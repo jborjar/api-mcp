@@ -1,0 +1,34 @@
+# Variables de entorno (contienen credenciales)
+.env
+*.env
+api_mcp/.env
+
+# Claude Code
+.claude/
+
+# Datos de base de datos
+db/
+db/mssql/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

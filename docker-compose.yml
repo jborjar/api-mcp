@@ -1,0 +1,85 @@
+services:
+  mssql-api-mcp:
+    build:
+      context: ./api_mcp/Docker
+      dockerfile: Dockerfile.mssql2022
+    image: jbr_mssql:2022
+    container_name: mssql-api-mcp
+    hostname: mssql-api-mcp
+    restart: unless-stopped
+    env_file:
+      - ./api_mcp/.env
+    environment:
+      - ACCEPT_EULA=Y
+    volumes:
+      - ./db/mssql:/var/opt/mssql
+    networks:
+      - vpn-proxy
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$${SA_PASSWORD}" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  postfix:
+    build:
+      context: ./api_mcp/Docker
+      dockerfile: Dockerfile.postfix
+    image: jbr_postfix
+    container_name: postfix-api-mcp
+    hostname: postfix-api-mcp
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    env_file:
+      - ./api_mcp/.env
+    environment:
+      - POSTFIX_HOSTNAME=${POSTFIX_HOSTNAME:-mail.progex.grupoexpansion.com}
+      - POSTFIX_DOMAIN=${POSTFIX_DOMAIN:-progex.grupoexpansion.com}
+      - POSTFIX_NETWORKS=${POSTFIX_NETWORKS:-172.16.0.0/12 192.168.0.0/16 10.0.0.0/8}
+      # Relay externo (opcional, descomentar para usar)
+      # - POSTFIX_RELAY_HOST=${POSTFIX_RELAY_HOST:-}
+      # - POSTFIX_RELAY_PORT=${POSTFIX_RELAY_PORT:-587}
+      # - POSTFIX_RELAY_USER=${POSTFIX_RELAY_USER:-}
+      # - POSTFIX_RELAY_PASSWORD=${POSTFIX_RELAY_PASSWORD:-}
+    ports:
+      - 25:25
+    networks:
+      - vpn-proxy
+    healthcheck:
+      test: postfix status || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  api-mcp:
+    build:
+      context: ./api_mcp/Docker
+      dockerfile: Dockerfile.api-mcp
+    image: jbr_api-mcp
+    container_name: api-mcp
+    hostname: api-mcp
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN # <--- necesario para ip route
+    env_file:
+      - ./api_mcp/.env
+    volumes:
+      - ./app:/app
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    networks:
+      - vpn-proxy
+    depends_on:
+      mssql-api-mcp:
+        condition: service_healthy
+      postfix:
+        condition: service_healthy
+
+networks:
+  vpn-proxy:
+    external: true

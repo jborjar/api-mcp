@@ -1,0 +1,50 @@
+FROM ubuntu:20.04
+
+# Variables de entorno
+ENV ACCEPT_EULA=Y \
+    TZ=America/Mexico_City \
+    LANG=es_MX.UTF-8 \
+    LC_ALL=es_MX.UTF-8
+
+# Configurar zona horaria
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
+
+# Instalar paquetes de idioma español
+RUN apt-get update && \
+    apt-get install -y locales && \
+    locale-gen $LANG && \
+    update-locale LANG=$LANG LC_ALL=$LC_ALL
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y curl gnupg2 apt-transport-https && \
+    rm -rf /var/lib/apt/lists/*
+
+# Importar clave GPG
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+
+# Agregar repositorio de SQL Server 2022
+RUN curl https://packages.microsoft.com/config/ubuntu/20.04/mssql-server-2022.list > /etc/apt/sources.list.d/mssql-server.list
+
+# Agregar repositorio de herramientas (sqlcmd, bcp)
+RUN curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list > /etc/apt/sources.list.d/mssql-release.list
+
+# Instalación
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive ACCEPT_EULA=Y apt-get install -y \
+    mssql-server \
+    mssql-tools18 \
+    unixodbc-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Agregar herramientas al PATH
+ENV PATH="$PATH:/opt/mssql-tools18/bin"
+
+# Copiar entrypoint
+COPY entrypoint_mssql.sh /entrypoint_mssql.sh
+RUN chmod +x /entrypoint_mssql.sh
+
+# Exponer puerto
+EXPOSE 1433
+
+CMD ["/entrypoint_mssql.sh"]
