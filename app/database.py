@@ -862,14 +862,41 @@ def actualizar_sap_proveedores() -> dict:
             cardcodes_sap = {prov.get("CardCode") for prov in proveedores}
 
             # Eliminar proveedores que ya no existen en SAP para esta instancia
+            # Nota: SQL Server tiene límite de ~2100 parámetros, así que usamos
+            # una tabla temporal para evitar el límite del NOT IN
             if cardcodes_sap:
-                placeholders_delete = ", ".join(["?" for _ in cardcodes_sap])
-                delete_sql = f"""
-                    DELETE FROM SAP_PROVEEDORES
-                    WHERE Instancia = ? AND CardCode NOT IN ({placeholders_delete})
-                """
-                cursor.execute(delete_sql, [instancia] + list(cardcodes_sap))
+                # Crear tabla temporal con los CardCodes de SAP
+                cursor.execute("""
+                    IF OBJECT_ID('tempdb..#CardCodesSAP') IS NOT NULL
+                        DROP TABLE #CardCodesSAP
+                """)
+                cursor.execute("""
+                    CREATE TABLE #CardCodesSAP (CardCode NVARCHAR(50) PRIMARY KEY)
+                """)
+
+                # Insertar CardCodes en lotes de 1000 para evitar límites
+                cardcodes_list = list(cardcodes_sap)
+                batch_size = 1000
+                for i in range(0, len(cardcodes_list), batch_size):
+                    batch = cardcodes_list[i:i + batch_size]
+                    placeholders = ", ".join(["(?)" for _ in batch])
+                    cursor.execute(
+                        f"INSERT INTO #CardCodesSAP (CardCode) VALUES {placeholders}",
+                        batch
+                    )
+
+                # Eliminar usando JOIN con tabla temporal (más eficiente)
+                cursor.execute("""
+                    DELETE p FROM SAP_PROVEEDORES p
+                    WHERE p.Instancia = ?
+                    AND NOT EXISTS (
+                        SELECT 1 FROM #CardCodesSAP t WHERE t.CardCode = p.CardCode
+                    )
+                """, [instancia])
                 deleted_count = cursor.rowcount
+
+                # Limpiar tabla temporal
+                cursor.execute("DROP TABLE #CardCodesSAP")
             else:
                 # Si no hay proveedores en SAP, eliminar todos de esta instancia
                 cursor.execute("DELETE FROM SAP_PROVEEDORES WHERE Instancia = ?", [instancia])

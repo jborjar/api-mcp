@@ -689,3 +689,39 @@ docker exec postfix-api-mcp date
 ```
 
 Todos deben mostrar la hora en formato español con zona horaria CST (America/Mexico_City).
+
+## Notas Técnicas
+
+### Límite de parámetros en SQL Server
+
+SQL Server tiene un límite de aproximadamente 2,100 parámetros por consulta. Esto afecta operaciones con cláusulas `IN` o `NOT IN` cuando se manejan grandes volúmenes de datos.
+
+**Solución implementada:** Para la sincronización de proveedores (que puede manejar más de 4,000 registros por instancia), se utiliza una **tabla temporal** en lugar de `NOT IN`:
+
+```sql
+-- En lugar de esto (falla con >2100 parámetros):
+DELETE FROM SAP_PROVEEDORES
+WHERE Instancia = ? AND CardCode NOT IN (?, ?, ?, ...)
+
+-- Se usa esto (sin límite de parámetros):
+CREATE TABLE #CardCodesSAP (CardCode NVARCHAR(50) PRIMARY KEY)
+INSERT INTO #CardCodesSAP (CardCode) VALUES (?), (?), ...  -- en lotes de 1000
+DELETE p FROM SAP_PROVEEDORES p
+WHERE p.Instancia = ?
+AND NOT EXISTS (SELECT 1 FROM #CardCodesSAP t WHERE t.CardCode = p.CardCode)
+DROP TABLE #CardCodesSAP
+```
+
+Esta estrategia es más eficiente y escala sin problemas para cualquier cantidad de registros.
+
+### Rendimiento de sincronización
+
+El endpoint `/inicializa_datos` sincroniza aproximadamente 13,000+ proveedores de 21 instancias SAP. Los tiempos de ejecución típicos son:
+
+| Operación | Registros | Tiempo aproximado |
+|-----------|-----------|-------------------|
+| SAP Empresas | 24 | < 5 segundos |
+| Test Service Layer | 24 instancias | < 30 segundos |
+| SAP Proveedores | ~13,000 | 2-5 minutos |
+
+**Recomendación:** Usar un timeout de al menos 10 minutos para el endpoint `/inicializa_datos`.
