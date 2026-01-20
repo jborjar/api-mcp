@@ -504,7 +504,11 @@ def send_email(to_email: str, subject: str, body: str, attachment: dict | None =
     msg.attach(MIMEText(body, "plain"))
 
     if attachment:
-        part = MIMEApplication(attachment["content"].encode("utf-8"), Name=attachment["filename"])
+        # Manejar tanto strings (JSON) como bytes (Excel)
+        content = attachment["content"]
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        part = MIMEApplication(content, Name=attachment["filename"])
         part["Content-Disposition"] = f'attachment; filename="{attachment["filename"]}"'
         msg.attach(part)
 
