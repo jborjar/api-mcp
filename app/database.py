@@ -9,6 +9,10 @@ from email.utils import make_msgid
 from datetime import datetime
 from hdbcli import dbapi
 from config import get_settings
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+from io import BytesIO
 
 
 def get_mssql_connection(database: str | None = None):
@@ -1281,6 +1285,7 @@ def analizar_inconsistencias_maestro_proveedores() -> dict:
 def enviar_correo_inconsistencias(resultados: dict) -> dict:
     """
     Envía correo con el reporte de inconsistencias del maestro de proveedores.
+    Genera un archivo Excel con múltiples hojas para cada tipo de inconsistencia.
     """
     settings = get_settings()
 
@@ -1307,45 +1312,119 @@ def enviar_correo_inconsistencias(resultados: dict) -> dict:
         f"4. Proveedores con CardName NULL: {inc['cardname_null']:,}",
         f"5. Proveedores con RFC NULL: {inc['rfc_null']:,}",
         "",
+        "Adjunto encontrará un archivo Excel con el detalle completo de todas las inconsistencias.",
+        ""
     ]
-
-    # Detalles de inconsistencias más críticas
-    if inc["mismo_rfc_diferente_nombre"]:
-        body_lines.append("TOP 10 - MISMO RFC+GroupCode PERO DIFERENTE NOMBRE:")
-        body_lines.append("-" * 80)
-        for item in inc["mismo_rfc_diferente_nombre"][:10]:
-            body_lines.append(f"  RFC: {item['rfc']}, GroupCode: {item['group_code']}")
-            body_lines.append(f"  Nombres diferentes: {item['nombres_diferentes']}")
-            body_lines.append(f"  Nombres: {item['nombres'][:150]}...")
-            body_lines.append("")
-
-    if inc["mismo_nombre_diferente_rfc"]:
-        body_lines.append("TOP 10 - MISMO NOMBRE PERO DIFERENTE RFC:")
-        body_lines.append("-" * 80)
-        for item in inc["mismo_nombre_diferente_rfc"][:10]:
-            body_lines.append(f"  Nombre: {item['card_name'][:60]}")
-            body_lines.append(f"  RFCs diferentes: {item['rfcs_diferentes']}")
-            body_lines.append(f"  RFCs: {item['rfcs']}")
-            body_lines.append("")
-
-    if inc["diferentes_cardcodes_por_instancia"]:
-        body_lines.append("TOP 10 - DIFERENTES CardCodes ENTRE INSTANCIAS:")
-        body_lines.append("-" * 80)
-        for item in inc["diferentes_cardcodes_por_instancia"][:10]:
-            body_lines.append(f"  RFC: {item['rfc']}")
-            body_lines.append(f"  Nombre: {item['card_name'][:60]}")
-            body_lines.append(f"  Códigos diferentes: {item['codigos_diferentes']}")
-            body_lines.append(f"  Presente en {item['total_instancias']} instancias")
-            for inst, code in list(item['cardcodes'].items())[:5]:
-                body_lines.append(f"    {inst}: {code}")
-            body_lines.append("")
 
     body = "\n".join(body_lines)
 
-    # Adjuntar JSON completo
+    # Generar archivo Excel
+    wb = Workbook()
+
+    # Estilos
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    header_alignment = Alignment(horizontal="center", vertical="center")
+
+    # Hoja 1: Resumen
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
+    ws_resumen.append(["REPORTE DE INCONSISTENCIAS - MAESTRO DE PROVEEDORES"])
+    ws_resumen.append([])
+    ws_resumen.append(["Fecha:", fecha])
+    ws_resumen.append(["Total registros en vista:", resultados['total_registros_vista']])
+    ws_resumen.append([])
+    ws_resumen.append(["RESUMEN DE INCONSISTENCIAS:"])
+    ws_resumen.append(["Tipo", "Cantidad"])
+    ws_resumen.append(["Mismo RFC+GroupCode, diferente nombre", len(inc['mismo_rfc_diferente_nombre'])])
+    ws_resumen.append(["Mismo nombre, diferente RFC", len(inc['mismo_nombre_diferente_rfc'])])
+    ws_resumen.append(["Diferentes CardCodes entre instancias", len(inc['diferentes_cardcodes_por_instancia'])])
+    ws_resumen.append(["Proveedores con CardName NULL", inc['cardname_null']])
+    ws_resumen.append(["Proveedores con RFC NULL", inc['rfc_null']])
+
+    # Aplicar estilo al encabezado de la tabla
+    for cell in ws_resumen[7]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    # Hoja 2: Mismo RFC diferente nombre
+    if inc["mismo_rfc_diferente_nombre"]:
+        ws_rfc = wb.create_sheet("RFC - Diferentes Nombres")
+        ws_rfc.append(["RFC", "GroupCode", "Nombres Diferentes", "Nombres"])
+        for cell in ws_rfc[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+
+        for item in inc["mismo_rfc_diferente_nombre"]:
+            ws_rfc.append([
+                item['rfc'],
+                item['group_code'],
+                item['nombres_diferentes'],
+                item['nombres']
+            ])
+
+        # Ajustar anchos de columna
+        ws_rfc.column_dimensions['A'].width = 20
+        ws_rfc.column_dimensions['B'].width = 15
+        ws_rfc.column_dimensions['C'].width = 20
+        ws_rfc.column_dimensions['D'].width = 80
+
+    # Hoja 3: Mismo nombre diferente RFC
+    if inc["mismo_nombre_diferente_rfc"]:
+        ws_nombre = wb.create_sheet("Nombre - Diferentes RFCs")
+        ws_nombre.append(["Nombre", "RFCs Diferentes", "RFCs"])
+        for cell in ws_nombre[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+
+        for item in inc["mismo_nombre_diferente_rfc"]:
+            ws_nombre.append([
+                item['card_name'],
+                item['rfcs_diferentes'],
+                item['rfcs']
+            ])
+
+        ws_nombre.column_dimensions['A'].width = 60
+        ws_nombre.column_dimensions['B'].width = 20
+        ws_nombre.column_dimensions['C'].width = 80
+
+    # Hoja 4: Diferentes CardCodes entre instancias
+    if inc["diferentes_cardcodes_por_instancia"]:
+        ws_cardcodes = wb.create_sheet("Diferentes CardCodes")
+        ws_cardcodes.append(["RFC", "Nombre", "Códigos Diferentes", "Total Instancias", "Detalle CardCodes"])
+        for cell in ws_cardcodes[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+
+        for item in inc["diferentes_cardcodes_por_instancia"]:
+            cardcodes_str = " | ".join([f"{inst}: {code}" for inst, code in item['cardcodes'].items()])
+            ws_cardcodes.append([
+                item['rfc'],
+                item['card_name'],
+                item['codigos_diferentes'],
+                item['total_instancias'],
+                cardcodes_str
+            ])
+
+        ws_cardcodes.column_dimensions['A'].width = 20
+        ws_cardcodes.column_dimensions['B'].width = 60
+        ws_cardcodes.column_dimensions['C'].width = 20
+        ws_cardcodes.column_dimensions['D'].width = 20
+        ws_cardcodes.column_dimensions['E'].width = 80
+
+    # Guardar Excel en memoria
+    excel_buffer = BytesIO()
+    wb.save(excel_buffer)
+    excel_buffer.seek(0)
+
+    # Adjuntar Excel
     attachment = {
-        "filename": f"inconsistencias_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-        "content": json.dumps(resultados, indent=2, ensure_ascii=False)
+        "filename": f"inconsistencias_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        "content": excel_buffer.read()
     }
 
     return send_email(settings.EMAIL_SUPERVISOR, subject, body, attachment)

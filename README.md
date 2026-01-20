@@ -708,8 +708,7 @@ resultado = analizar_inconsistencias_maestro_proveedores()
 La función envía automáticamente un correo al `EMAIL_SUPERVISOR` configurado con:
 
 - **Resumen ejecutivo** con totales de cada tipo de inconsistencia
-- **TOP 10** de los casos más críticos por categoría
-- **Archivo JSON adjunto** con el detalle completo de todas las inconsistencias detectadas
+- **Archivo Excel adjunto** con el detalle completo de todas las inconsistencias en múltiples hojas
 
 Ejemplo de resumen:
 
@@ -726,47 +725,38 @@ RESUMEN DE INCONSISTENCIAS:
 3. Diferentes CardCodes entre instancias: 1,234 casos
 4. Proveedores con CardName NULL: 0
 5. Proveedores con RFC NULL: 0
+
+Adjunto encontrará un archivo Excel con el detalle completo de todas las inconsistencias.
 ```
 
-### Estructura del JSON
+### Estructura del Archivo Excel
 
-El archivo JSON adjunto incluye:
+El archivo Excel adjunto (`inconsistencias_YYYYMMDD_HHMMSS.xlsx`) contiene múltiples hojas:
 
-```json
-{
-  "fecha_analisis": "2026-01-20 04:54:08",
-  "total_registros_vista": 7627,
-  "inconsistencias": {
-    "mismo_rfc_diferente_nombre": [
-      {
-        "rfc": "XEXX010101000",
-        "group_code": 103,
-        "nombres_diferentes": 394,
-        "nombres": "LINEUP SYSTEMS || LEONARD GARY || ..."
-      }
-    ],
-    "mismo_nombre_diferente_rfc": [...],
-    "diferentes_cardcodes_por_instancia": [
-      {
-        "rfc": "ABC123456789",
-        "card_name": "PROVEEDOR EJEMPLO",
-        "codigos_diferentes": 3,
-        "total_instancias": 5,
-        "cardcodes": {
-          "AIRPORTS": "N1000100",
-          "EXPANSION": "N1000200",
-          "CINETICA": "N1000300"
-        }
-      }
-    ],
-    "cardname_null": 0,
-    "rfc_null": 0
-  },
-  "email_enviado": {
-    "success": true
-  }
-}
-```
+#### 1. Hoja "Resumen"
+Tabla resumen con el total de cada tipo de inconsistencia.
+
+#### 2. Hoja "RFC - Diferentes Nombres"
+| RFC | GroupCode | Nombres Diferentes | Nombres |
+|-----|-----------|-------------------|---------|
+| XEXX010101000 | 103 | 394 | LINEUP SYSTEMS \|\| LEONARD GARY \|\| ... |
+
+#### 3. Hoja "Nombre - Diferentes RFCs"
+| Nombre | RFCs Diferentes | RFCs |
+|--------|----------------|------|
+| PROVEEDOR EJEMPLO | 2 | ABC123456789, XYZ987654321 |
+
+#### 4. Hoja "Diferentes CardCodes"
+| RFC | Nombre | Códigos Diferentes | Total Instancias | Detalle CardCodes |
+|-----|--------|-------------------|------------------|-------------------|
+| ABC123456789 | PROVEEDOR EJEMPLO | 3 | 5 | AIRPORTS: N1000100 \| EXPANSION: N1000200 \| CINETICA: N1000300 |
+
+### Características del Excel
+
+- **Formato profesional**: Encabezados con fondo azul y texto blanco
+- **Columnas ajustadas**: Anchos optimizados para lectura
+- **Organización por hojas**: Cada tipo de inconsistencia en su propia hoja
+- **Fácil análisis**: Datos tabulados listos para filtrado y análisis en Excel
 
 ## Servidor de Correo (Postfix)
 
