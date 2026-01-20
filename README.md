@@ -118,6 +118,7 @@ docker compose up -d
 
 - `GET /proveedores/{instancia}` - Obtener proveedores de una instancia SAP (requiere JWT)
 - `GET /test_service_layer` - Prueba conexión a Service Layer para todas las instancias SAP (requiere JWT)
+- `GET /maestro_proveedores` - Vista consolidada de proveedores con CardCode por instancia (requiere JWT)
 
 ### MCP (requieren JWT con scopes específicos)
 
@@ -623,6 +624,63 @@ El endpoint retorna los siguientes campos de cada proveedor, organizados por gru
 | **Bancario** | DefaultBankCode, DefaultAccount, BankCountry, HouseBank, HouseBankCountry, HouseBankAccount, HouseBankBranch, HouseBankIBAN, IBAN, CreditCardCode, CreditCardNum, CreditCardExpiration, DebitorAccount |
 | **Saldos** | CurrentAccountBalance, OpenDeliveryNotesBalance, OpenOrdersBalance, OpenChecksBalance, OpenOpportunities |
 | **Estado** | Valid, Frozen, BlockDunning, BackOrder, PartialDelivery |
+
+## Endpoint maestro_proveedores
+
+El endpoint `GET /maestro_proveedores` consulta una vista pivoteada que muestra todos los proveedores con una columna por cada instancia SAP.
+
+### Estructura de la respuesta
+
+| Columna | Descripción |
+|---------|-------------|
+| CardName | Nombre del proveedor |
+| GroupCode | Código de grupo |
+| FederalTaxID | RFC del proveedor |
+| AIRPORTS, ANDENES, ... | CardCode del proveedor en cada instancia (NULL si no existe) |
+
+### Parámetros
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `top` | Limita el número de registros retornados |
+| `card_name` | Filtra por nombre que contenga el valor |
+| `federal_tax_id` | Filtra por RFC que contenga el valor |
+
+### Ejemplo de uso
+
+```bash
+# Buscar proveedores por nombre
+curl "http://localhost:8000/maestro_proveedores?card_name=DAHFSA&top=5" \
+  -H "Authorization: Bearer <token>"
+```
+
+Respuesta:
+```json
+{
+  "success": true,
+  "total": 3,
+  "columnas": ["CardName", "GroupCode", "FederalTaxID", "AIRPORTS", "ANDENES", ...],
+  "proveedores": [
+    {
+      "CardName": "DAHFSA DE MÉXICO, S.A. DE C.V.",
+      "GroupCode": 101,
+      "FederalTaxID": "DME0905224P7",
+      "AIRPORTS": "N1000119",
+      "ANDENES": "N1000119",
+      "AUTOBUSES": "N1000119",
+      "EXPANSION": "N1000119",
+      "CINETICA": null,
+      ...
+    }
+  ]
+}
+```
+
+### Notas
+
+- La vista se actualiza automáticamente al ejecutar `/inicializa_datos`
+- Las columnas de instancias son dinámicas y se generan según las instancias existentes en SAP_PROVEEDORES
+- Un proveedor puede tener el mismo CardCode en múltiples instancias o CardCodes diferentes
 
 ## Servidor de Correo (Postfix)
 

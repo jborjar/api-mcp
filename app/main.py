@@ -20,6 +20,8 @@ from database import (
     enviar_correo_inicializacion,
     actualizar_sap_empresas,
     actualizar_sap_proveedores,
+    create_or_update_vista_maestro_proveedores,
+    get_maestro_proveedores,
 )
 from mcp import router as mcp_router
 
@@ -138,6 +140,9 @@ async def inicializa_datos(
     resultado_sl = test_service_layer_all_instances(sap_empresas_result=resultado_empresas, skip_email=True)
     resultado_proveedores = poblar_sap_proveedores()
 
+    # Actualizar vista maestro_proveedores
+    vista_actualizada = create_or_update_vista_maestro_proveedores()
+
     # Enviar correo con todos los resultados (incluyendo desglose de proveedores)
     email_result = enviar_correo_inicializacion(resultado_empresas, resultado_sl, resultado_proveedores)
     resultado_sl["email_enviado"] = email_result
@@ -145,7 +150,8 @@ async def inicializa_datos(
     return {
         "sap_empresas": resultado_empresas,
         "service_layer": resultado_sl,
-        "sap_proveedores": resultado_proveedores
+        "sap_proveedores": resultado_proveedores,
+        "vista_maestro_proveedores": vista_actualizada
     }
 
 
@@ -222,3 +228,33 @@ async def get_proveedores(
         "total": resultado["total"],
         "proveedores": resultado["proveedores"]
     }
+
+
+@app.get("/maestro_proveedores", tags=["MSSQL"])
+async def maestro_proveedores(
+    current_user: Annotated[TokenData, Depends(get_current_user)],
+    top: int | None = None,
+    card_name: str | None = None,
+    federal_tax_id: str | None = None
+) -> dict:
+    """
+    Consulta la vista maestro_proveedores.
+
+    Muestra proveedores con una columna por cada instancia SAP,
+    donde el valor es el CardCode en esa instancia (o NULL si no existe).
+
+    - **top**: Limita el número de registros retornados (opcional)
+    - **card_name**: Filtra por nombre que contenga el valor (opcional)
+    - **federal_tax_id**: Filtra por RFC que contenga el valor (opcional)
+    """
+    resultado = get_maestro_proveedores(
+        top=top,
+        card_name=card_name,
+        federal_tax_id=federal_tax_id
+    )
+    if not resultado["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=resultado.get("error", "Error al consultar maestro de proveedores")
+        )
+    return resultado

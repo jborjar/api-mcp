@@ -188,6 +188,115 @@ def ensure_table_sap_proveedores_exists() -> bool:
         conn.close()
 
 
+def create_or_update_vista_maestro_proveedores() -> bool:
+    """
+    Crea o actualiza la vista maestro_proveedores.
+    La vista pivotea los proveedores mostrando CardName, GroupCode, FederalTaxID
+    y una columna por cada instancia con el CardCode correspondiente.
+    """
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Obtener las instancias únicas de SAP_PROVEEDORES
+        cursor.execute("SELECT DISTINCT Instancia FROM SAP_PROVEEDORES ORDER BY Instancia")
+        instancias = [row[0] for row in cursor.fetchall()]
+
+        if not instancias:
+            return False
+
+        # Construir columnas para el PIVOT
+        pivot_columns = ", ".join([f"[{inst}]" for inst in instancias])
+
+        # Crear o actualizar la vista
+        view_sql = f"""
+            CREATE OR ALTER VIEW maestro_proveedores AS
+            SELECT
+                CardName,
+                GroupCode,
+                FederalTaxID,
+                {pivot_columns}
+            FROM (
+                SELECT CardName, GroupCode, FederalTaxID, Instancia, CardCode
+                FROM SAP_PROVEEDORES
+            ) AS SourceTable
+            PIVOT (
+                MAX(CardCode)
+                FOR Instancia IN ({pivot_columns})
+            ) AS PivotTable
+        """
+
+        cursor.execute(view_sql)
+        conn.commit()
+        return True
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def get_maestro_proveedores(
+    top: int | None = None,
+    card_name: str | None = None,
+    federal_tax_id: str | None = None
+) -> dict:
+    """
+    Consulta la vista maestro_proveedores.
+    Retorna proveedores con CardName, GroupCode, FederalTaxID y CardCode por instancia.
+    """
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Verificar si la vista existe
+        cursor.execute("""
+            SELECT COUNT(*) FROM INFORMATION_SCHEMA.VIEWS
+            WHERE TABLE_NAME = 'maestro_proveedores'
+        """)
+        if cursor.fetchone()[0] == 0:
+            return {"success": False, "error": "Vista maestro_proveedores no existe. Ejecute /inicializa_datos primero."}
+
+        # Construir query con filtros
+        query = "SELECT * FROM maestro_proveedores WHERE 1=1"
+        params = []
+
+        if card_name:
+            query += " AND CardName LIKE ?"
+            params.append(f"%{card_name}%")
+
+        if federal_tax_id:
+            query += " AND FederalTaxID LIKE ?"
+            params.append(f"%{federal_tax_id}%")
+
+        # Ordenar por CardName
+        query += " ORDER BY CardName"
+
+        # Aplicar TOP si se especifica
+        if top:
+            query = query.replace("SELECT *", f"SELECT TOP {top} *")
+
+        cursor.execute(query, params)
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
+
+        # Convertir a lista de diccionarios
+        proveedores = []
+        for row in rows:
+            prov = {}
+            for i, col in enumerate(columns):
+                prov[col] = row[i]
+            proveedores.append(prov)
+
+        return {
+            "success": True,
+            "total": len(proveedores),
+            "columnas": columns,
+            "proveedores": proveedores
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def get_hana_connection():
     settings = get_settings()
     return dbapi.connect(
