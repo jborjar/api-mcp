@@ -1480,6 +1480,242 @@ def enviar_correo_inconsistencias(resultados: dict) -> dict:
     return send_email(settings.EMAIL_SUPERVISOR, subject, body, attachment)
 
 
+def analizar_actividad_proveedores(anos: int = 3) -> dict:
+    """
+    Analiza la actividad de proveedores en los últimos N años.
+
+    Revisa en cada instancia SAP si el proveedor tiene documentos de compra
+    (facturas OPCH o órdenes de compra OPOR) en el período especificado.
+
+    Args:
+        anos: Número de años hacia atrás a analizar (default: 3)
+
+    Returns:
+        dict con resultados del análisis y envío de correo
+    """
+    settings = get_settings()
+    conn_mssql = get_mssql_connection()
+    cursor_mssql = conn_mssql.cursor()
+
+    try:
+        # Obtener todas las instancias SAP
+        cursor_mssql.execute("SELECT Instancia FROM SAP_EMPRESAS ORDER BY Instancia")
+        instancias = [row[0] for row in cursor_mssql.fetchall()]
+
+        if not instancias:
+            return {"success": False, "error": "No hay instancias en SAP_EMPRESAS"}
+
+        # Obtener todos los proveedores únicos del maestro
+        cursor_mssql.execute("""
+            SELECT DISTINCT CardName, FederalTaxID
+            FROM maestro_proveedores
+            WHERE CardName IS NOT NULL
+            ORDER BY CardName
+        """)
+        proveedores_maestro = cursor_mssql.fetchall()
+
+        resultados = {
+            "fecha_analisis": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "anos_analizados": anos,
+            "total_proveedores": len(proveedores_maestro),
+            "activos": [],
+            "inactivos": []
+        }
+
+        # Conectar a HANA para consultar actividad
+        conn_hana = get_hana_connection()
+        cursor_hana = conn_hana.cursor()
+
+        # Para cada proveedor, revisar actividad en todas las instancias
+        for card_name, rfc in proveedores_maestro:
+            actividad_encontrada = False
+            instancias_con_actividad = []
+            ultima_fecha = None
+            total_documentos = 0
+
+            for instancia in instancias:
+                try:
+                    # Buscar el CardCode en esta instancia
+                    cursor_mssql.execute("""
+                        SELECT CardCode
+                        FROM SAP_PROVEEDORES
+                        WHERE Instancia = ? AND CardName = ?
+                    """, [instancia, card_name])
+
+                    result = cursor_mssql.fetchone()
+                    if not result:
+                        continue
+
+                    card_code = result[0]
+
+                    # Consultar actividad en HANA para esta instancia
+                    # Verificar facturas (OPCH) y órdenes de compra (OPOR)
+                    query = f"""
+                        SELECT COUNT(*) as docs, MAX(DocDate) as ultima_fecha
+                        FROM (
+                            SELECT DocDate FROM "{instancia}".OPCH
+                            WHERE CardCode = ?
+                            AND DocDate >= ADD_YEARS(CURRENT_DATE, -{anos})
+                            UNION ALL
+                            SELECT DocDate FROM "{instancia}".OPOR
+                            WHERE CardCode = ?
+                            AND DocDate >= ADD_YEARS(CURRENT_DATE, -{anos})
+                        )
+                    """
+
+                    cursor_hana.execute(query, [card_code, card_code])
+                    row = cursor_hana.fetchone()
+
+                    if row and row[0] > 0:
+                        actividad_encontrada = True
+                        instancias_con_actividad.append(instancia)
+                        total_documentos += row[0]
+
+                        if row[1]:
+                            fecha_doc = row[1]
+                            if ultima_fecha is None or fecha_doc > ultima_fecha:
+                                ultima_fecha = fecha_doc
+
+                except Exception as e:
+                    # Si hay error en una instancia, continuar con la siguiente
+                    pass
+
+            # Clasificar proveedor como activo o inactivo
+            proveedor_info = {
+                "card_name": card_name,
+                "rfc": rfc if rfc else "",
+                "total_documentos": total_documentos,
+                "instancias_con_actividad": ", ".join(instancias_con_actividad) if instancias_con_actividad else "",
+                "ultima_fecha": ultima_fecha.strftime("%Y-%m-%d") if ultima_fecha else ""
+            }
+
+            if actividad_encontrada:
+                resultados["activos"].append(proveedor_info)
+            else:
+                resultados["inactivos"].append(proveedor_info)
+
+        cursor_hana.close()
+        conn_hana.close()
+
+        # Enviar correo con el reporte
+        if settings.EMAIL_SUPERVISOR:
+            email_result = enviar_correo_actividad_proveedores(resultados)
+            resultados["email_enviado"] = email_result
+        else:
+            resultados["email_enviado"] = {"success": False, "error": "EMAIL_SUPERVISOR no configurado"}
+
+        return {
+            "success": True,
+            "resultados": resultados
+        }
+
+    finally:
+        cursor_mssql.close()
+        conn_mssql.close()
+
+
+def enviar_correo_actividad_proveedores(resultados: dict) -> dict:
+    """
+    Envía correo con el reporte de actividad de proveedores.
+    Genera un archivo Excel con dos hojas: Activos e Inactivos.
+    """
+    settings = get_settings()
+
+    if not settings.EMAIL_SUPERVISOR:
+        return {"success": False, "error": "No hay destinatario configurado"}
+
+    fecha = resultados.get("fecha_analisis", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    anos = resultados.get("anos_analizados", 3)
+    subject = f"Actividad de Proveedores - Últimos {anos} Años - {fecha}"
+
+    total_activos = len(resultados["activos"])
+    total_inactivos = len(resultados["inactivos"])
+    total_proveedores = resultados["total_proveedores"]
+
+    # Construir cuerpo del mensaje
+    body_lines = [
+        "REPORTE DE ACTIVIDAD DE PROVEEDORES",
+        "=" * 80,
+        f"Fecha: {fecha}",
+        f"Período analizado: Últimos {anos} años",
+        f"Total proveedores analizados: {total_proveedores:,}",
+        "",
+        "RESUMEN:",
+        "-" * 80,
+        f"Proveedores ACTIVOS: {total_activos:,} ({total_activos/total_proveedores*100:.1f}%)",
+        f"Proveedores INACTIVOS: {total_inactivos:,} ({total_inactivos/total_proveedores*100:.1f}%)",
+        "",
+        "Adjunto encontrará un archivo Excel con el detalle completo de la actividad.",
+        ""
+    ]
+
+    body = "\n".join(body_lines)
+
+    # Generar archivo Excel
+    wb = Workbook()
+
+    # Estilos
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    header_alignment = Alignment(horizontal="center", vertical="center")
+
+    # Hoja 1: Activos
+    ws_activos = wb.active
+    ws_activos.title = "Activos"
+    ws_activos.append(["Nombre", "RFC", "Total Documentos", "Instancias con Actividad", "Última Fecha"])
+
+    for cell in ws_activos[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for prov in resultados["activos"]:
+        ws_activos.append([
+            prov["card_name"],
+            prov["rfc"],
+            prov["total_documentos"],
+            prov["instancias_con_actividad"],
+            prov["ultima_fecha"]
+        ])
+
+    ws_activos.column_dimensions['A'].width = 60
+    ws_activos.column_dimensions['B'].width = 20
+    ws_activos.column_dimensions['C'].width = 20
+    ws_activos.column_dimensions['D'].width = 40
+    ws_activos.column_dimensions['E'].width = 15
+
+    # Hoja 2: Inactivos
+    ws_inactivos = wb.create_sheet("Inactivos")
+    ws_inactivos.append(["Nombre", "RFC"])
+
+    for cell in ws_inactivos[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for prov in resultados["inactivos"]:
+        ws_inactivos.append([
+            prov["card_name"],
+            prov["rfc"]
+        ])
+
+    ws_inactivos.column_dimensions['A'].width = 60
+    ws_inactivos.column_dimensions['B'].width = 20
+
+    # Guardar Excel en memoria
+    excel_buffer = BytesIO()
+    wb.save(excel_buffer)
+    excel_buffer.seek(0)
+
+    # Adjuntar Excel
+    attachment = {
+        "filename": f"Actividad_Proveedores_Ultimos_{anos}_Anos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        "content": excel_buffer.read()
+    }
+
+    return send_email(settings.EMAIL_SUPERVISOR, subject, body, attachment)
+
+
 # Alias para compatibilidad con código existente
 def poblar_sap_proveedores() -> dict:
     """Alias de actualizar_sap_proveedores() para compatibilidad."""

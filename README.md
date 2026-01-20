@@ -765,6 +765,94 @@ Tabla resumen con el total de cada tipo de inconsistencia.
 - **Organización por hojas**: Cada tipo de inconsistencia en su propia hoja
 - **Fácil análisis**: Datos tabulados listos para filtrado y análisis en Excel
 
+## Análisis de Actividad de Proveedores
+
+El sistema incluye una función interna `analizar_actividad_proveedores(anos)` que analiza la actividad de los proveedores en SAP Business One en los últimos N años.
+
+### Funcionamiento
+
+La función revisa por cada proveedor en el maestro si tiene documentos de compra (facturas OPCH o órdenes de compra OPOR) en el período especificado, consultando todas las instancias SAP donde el proveedor está registrado.
+
+### Uso de la Función
+
+Esta función es de uso interno y no está expuesta como endpoint público. Se puede invocar desde código Python:
+
+```python
+from database import analizar_actividad_proveedores
+
+# Analizar últimos 3 años (default)
+resultado = analizar_actividad_proveedores()
+
+# Analizar últimos 5 años
+resultado = analizar_actividad_proveedores(anos=5)
+```
+
+### Reporte Automático por Correo
+
+La función envía automáticamente un correo al `EMAIL_SUPERVISOR` configurado con:
+
+- **Resumen ejecutivo** con totales de proveedores activos e inactivos
+- **Archivo Excel adjunto** con el detalle de la actividad
+
+Ejemplo de resumen:
+
+```
+REPORTE DE ACTIVIDAD DE PROVEEDORES
+================================================================================
+Fecha: 2026-01-20 10:30:00
+Período analizado: Últimos 3 años
+Total proveedores analizados: 7,627
+
+RESUMEN:
+--------------------------------------------------------------------------------
+Proveedores ACTIVOS: 5,234 (68.6%)
+Proveedores INACTIVOS: 2,393 (31.4%)
+
+Adjunto encontrará un archivo Excel con el detalle completo de la actividad.
+```
+
+### Estructura del Archivo Excel
+
+El archivo Excel adjunto (`Actividad_Proveedores_Ultimos_N_Anos_YYYYMMDD_HHMMSS.xlsx`) contiene dos hojas:
+
+#### 1. Hoja "Activos"
+Proveedores con actividad en el período especificado.
+
+| Nombre | RFC | Total Documentos | Instancias con Actividad | Última Fecha |
+|--------|-----|------------------|-------------------------|--------------|
+| PROVEEDOR ACTIVO SA DE CV | ABC123456789 | 45 | AIRPORTS, EXPANSION, CINETICA | 2026-01-15 |
+
+**Columnas:**
+- **Nombre**: Nombre del proveedor
+- **RFC**: RFC del proveedor
+- **Total Documentos**: Número total de facturas y órdenes de compra en todas las instancias
+- **Instancias con Actividad**: Lista de instancias SAP donde tiene documentos
+- **Última Fecha**: Fecha del documento más reciente
+
+#### 2. Hoja "Inactivos"
+Proveedores sin actividad en el período especificado.
+
+| Nombre | RFC |
+|--------|-----|
+| PROVEEDOR INACTIVO SA DE CV | XYZ987654321 |
+
+**Columnas:**
+- **Nombre**: Nombre del proveedor
+- **RFC**: RFC del proveedor
+
+### Criterios de Clasificación
+
+- **Activo**: Tiene al menos un documento (factura OPCH o orden de compra OPOR) en el período especificado en cualquier instancia SAP
+- **Inactivo**: No tiene ningún documento en el período especificado en ninguna instancia SAP
+
+### Notas Técnicas
+
+- La función consulta las tablas `OPCH` (Facturas de proveedores) y `OPOR` (Órdenes de compra) en SAP HANA
+- Se analiza cada instancia SAP de forma independiente
+- Si un proveedor tiene actividad en al menos una instancia, se considera activo
+- La última fecha mostrada corresponde al documento más reciente en todas las instancias
+- El total de documentos es la suma de facturas y órdenes en todas las instancias
+
 ## Servidor de Correo (Postfix)
 
 El proyecto incluye un contenedor Postfix para el envío de correos electrónicos. Por defecto está configurado para envío directo (sin relay).
