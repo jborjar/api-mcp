@@ -1130,6 +1130,227 @@ def actualizar_sap_proveedores() -> dict:
     return resultados
 
 
+def analizar_inconsistencias_maestro_proveedores() -> dict:
+    """
+    Analiza inconsistencias en la vista maestro_proveedores y envía reporte por correo.
+
+    Detecta:
+    1. Mismo RFC+GroupCode pero diferente CardName
+    2. Mismo CardName pero diferente RFC
+    3. Mismo RFC con diferentes CardCodes entre instancias
+    4. Proveedores con CardName o RFC NULL
+    """
+    settings = get_settings()
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Obtener columnas de instancias dinámicamente
+        cursor.execute("SELECT DISTINCT Instancia FROM SAP_PROVEEDORES ORDER BY Instancia")
+        instancias = [row[0] for row in cursor.fetchall()]
+
+        if not instancias:
+            return {"success": False, "error": "No hay instancias en SAP_PROVEEDORES"}
+
+        resultados = {
+            "fecha_analisis": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_registros_vista": 0,
+            "inconsistencias": {
+                "mismo_rfc_diferente_nombre": [],
+                "mismo_nombre_diferente_rfc": [],
+                "diferentes_cardcodes_por_instancia": [],
+                "cardname_null": 0,
+                "rfc_null": 0
+            }
+        }
+
+        # Total de registros en la vista
+        cursor.execute("SELECT COUNT(*) FROM maestro_proveedores")
+        resultados["total_registros_vista"] = cursor.fetchone()[0]
+
+        # 1. Mismo RFC+GroupCode pero diferente CardName
+        cursor.execute("""
+            SELECT
+                FederalTaxID,
+                GroupCode,
+                COUNT(DISTINCT CardName) as nombres_diferentes,
+                STRING_AGG(CAST(CardName AS NVARCHAR(MAX)), ' || ') as nombres
+            FROM maestro_proveedores
+            WHERE FederalTaxID IS NOT NULL
+            GROUP BY FederalTaxID, GroupCode
+            HAVING COUNT(DISTINCT CardName) > 1
+            ORDER BY nombres_diferentes DESC
+        """)
+        for row in cursor.fetchall():
+            resultados["inconsistencias"]["mismo_rfc_diferente_nombre"].append({
+                "rfc": row[0],
+                "group_code": row[1],
+                "nombres_diferentes": row[2],
+                "nombres": row[3][:500] if row[3] else ""
+            })
+
+        # 2. Mismo CardName pero diferente RFC
+        cursor.execute("""
+            SELECT
+                CardName,
+                COUNT(DISTINCT FederalTaxID) as rfcs_diferentes,
+                STRING_AGG(FederalTaxID, ', ') as rfcs
+            FROM maestro_proveedores
+            WHERE CardName IS NOT NULL AND FederalTaxID IS NOT NULL
+            GROUP BY CardName
+            HAVING COUNT(DISTINCT FederalTaxID) > 1
+            ORDER BY rfcs_diferentes DESC
+        """)
+        for row in cursor.fetchall():
+            resultados["inconsistencias"]["mismo_nombre_diferente_rfc"].append({
+                "card_name": row[0][:200] if row[0] else "",
+                "rfcs_diferentes": row[1],
+                "rfcs": row[2][:500] if row[2] else ""
+            })
+
+        # 3. Mismo RFC con diferentes CardCodes entre instancias
+        # Construir la consulta dinámicamente
+        comparaciones = []
+        for i in range(len(instancias)):
+            for j in range(i + 1, len(instancias)):
+                inst1 = instancias[i]
+                inst2 = instancias[j]
+                comparaciones.append(
+                    f"([{inst1}] IS NOT NULL AND [{inst2}] IS NOT NULL AND [{inst1}] <> [{inst2}])"
+                )
+
+        if comparaciones:
+            where_clause = " OR ".join(comparaciones)
+            columnas_instancias = ", ".join([f"[{inst}]" for inst in instancias])
+
+            query = f"""
+                SELECT
+                    FederalTaxID,
+                    CardName,
+                    {columnas_instancias}
+                FROM maestro_proveedores
+                WHERE FederalTaxID IS NOT NULL
+                AND ({where_clause})
+            """
+
+            cursor.execute(query)
+            for row in cursor.fetchall():
+                # Contar códigos únicos no nulos
+                codigos = [row[i + 2] for i in range(len(instancias)) if row[i + 2] is not None]
+                codigos_unicos = len(set(codigos))
+
+                if codigos_unicos > 1:
+                    cardcodes_por_inst = {}
+                    for i, inst in enumerate(instancias):
+                        if row[i + 2] is not None:
+                            cardcodes_por_inst[inst] = row[i + 2]
+
+                    resultados["inconsistencias"]["diferentes_cardcodes_por_instancia"].append({
+                        "rfc": row[0],
+                        "card_name": row[1][:200] if row[1] else "",
+                        "codigos_diferentes": codigos_unicos,
+                        "total_instancias": len(codigos),
+                        "cardcodes": cardcodes_por_inst
+                    })
+
+        # 4. CardName NULL
+        cursor.execute("SELECT COUNT(*) FROM maestro_proveedores WHERE CardName IS NULL")
+        resultados["inconsistencias"]["cardname_null"] = cursor.fetchone()[0]
+
+        # 5. RFC NULL
+        cursor.execute("SELECT COUNT(*) FROM maestro_proveedores WHERE FederalTaxID IS NULL")
+        resultados["inconsistencias"]["rfc_null"] = cursor.fetchone()[0]
+
+        # Enviar correo con el reporte
+        if settings.EMAIL_SUPERVISOR:
+            email_result = enviar_correo_inconsistencias(resultados)
+            resultados["email_enviado"] = email_result
+        else:
+            resultados["email_enviado"] = {"success": False, "error": "EMAIL_SUPERVISOR no configurado"}
+
+        return {
+            "success": True,
+            "resultados": resultados
+        }
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def enviar_correo_inconsistencias(resultados: dict) -> dict:
+    """
+    Envía correo con el reporte de inconsistencias del maestro de proveedores.
+    """
+    settings = get_settings()
+
+    if not settings.EMAIL_SUPERVISOR:
+        return {"success": False, "error": "No hay destinatario configurado"}
+
+    fecha = resultados.get("fecha_analisis", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    subject = f"Reporte de Inconsistencias - Maestro Proveedores - {fecha}"
+
+    inc = resultados["inconsistencias"]
+
+    # Construir cuerpo del mensaje
+    body_lines = [
+        "REPORTE DE INCONSISTENCIAS - MAESTRO DE PROVEEDORES",
+        "=" * 80,
+        f"Fecha: {fecha}",
+        f"Total registros en vista: {resultados['total_registros_vista']:,}",
+        "",
+        "RESUMEN DE INCONSISTENCIAS:",
+        "-" * 80,
+        f"1. Mismo RFC+GroupCode, diferente nombre: {len(inc['mismo_rfc_diferente_nombre']):,} casos",
+        f"2. Mismo nombre, diferente RFC: {len(inc['mismo_nombre_diferente_rfc']):,} casos",
+        f"3. Diferentes CardCodes entre instancias: {len(inc['diferentes_cardcodes_por_instancia']):,} casos",
+        f"4. Proveedores con CardName NULL: {inc['cardname_null']:,}",
+        f"5. Proveedores con RFC NULL: {inc['rfc_null']:,}",
+        "",
+    ]
+
+    # Detalles de inconsistencias más críticas
+    if inc["mismo_rfc_diferente_nombre"]:
+        body_lines.append("TOP 10 - MISMO RFC+GroupCode PERO DIFERENTE NOMBRE:")
+        body_lines.append("-" * 80)
+        for item in inc["mismo_rfc_diferente_nombre"][:10]:
+            body_lines.append(f"  RFC: {item['rfc']}, GroupCode: {item['group_code']}")
+            body_lines.append(f"  Nombres diferentes: {item['nombres_diferentes']}")
+            body_lines.append(f"  Nombres: {item['nombres'][:150]}...")
+            body_lines.append("")
+
+    if inc["mismo_nombre_diferente_rfc"]:
+        body_lines.append("TOP 10 - MISMO NOMBRE PERO DIFERENTE RFC:")
+        body_lines.append("-" * 80)
+        for item in inc["mismo_nombre_diferente_rfc"][:10]:
+            body_lines.append(f"  Nombre: {item['card_name'][:60]}")
+            body_lines.append(f"  RFCs diferentes: {item['rfcs_diferentes']}")
+            body_lines.append(f"  RFCs: {item['rfcs']}")
+            body_lines.append("")
+
+    if inc["diferentes_cardcodes_por_instancia"]:
+        body_lines.append("TOP 10 - DIFERENTES CardCodes ENTRE INSTANCIAS:")
+        body_lines.append("-" * 80)
+        for item in inc["diferentes_cardcodes_por_instancia"][:10]:
+            body_lines.append(f"  RFC: {item['rfc']}")
+            body_lines.append(f"  Nombre: {item['card_name'][:60]}")
+            body_lines.append(f"  Códigos diferentes: {item['codigos_diferentes']}")
+            body_lines.append(f"  Presente en {item['total_instancias']} instancias")
+            for inst, code in list(item['cardcodes'].items())[:5]:
+                body_lines.append(f"    {inst}: {code}")
+            body_lines.append("")
+
+    body = "\n".join(body_lines)
+
+    # Adjuntar JSON completo
+    attachment = {
+        "filename": f"inconsistencias_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        "content": json.dumps(resultados, indent=2, ensure_ascii=False)
+    }
+
+    return send_email(settings.EMAIL_SUPERVISOR, subject, body, attachment)
+
+
 # Alias para compatibilidad con código existente
 def poblar_sap_proveedores() -> dict:
     """Alias de actualizar_sap_proveedores() para compatibilidad."""
