@@ -1147,6 +1147,7 @@ def analizar_inconsistencias_maestro_proveedores() -> dict:
     2. Mismo CardName pero diferente RFC
     3. Mismo RFC con diferentes CardCodes entre instancias
     4. Proveedores con CardName o RFC NULL
+    5. Proveedores sin EmailAddress registrado
     """
     settings = get_settings()
     conn = get_mssql_connection()
@@ -1168,7 +1169,8 @@ def analizar_inconsistencias_maestro_proveedores() -> dict:
                 "mismo_nombre_diferente_rfc": [],
                 "diferentes_cardcodes_por_instancia": [],
                 "cardname_null": 0,
-                "rfc_null": 0
+                "rfc_null": 0,
+                "sin_email": []
             }
         }
 
@@ -1269,6 +1271,26 @@ def analizar_inconsistencias_maestro_proveedores() -> dict:
         cursor.execute("SELECT COUNT(*) FROM maestro_proveedores WHERE FederalTaxID IS NULL")
         resultados["inconsistencias"]["rfc_null"] = cursor.fetchone()[0]
 
+        # 6. Proveedores sin EmailAddress
+        # Obtener proveedores de SAP_PROVEEDORES que no tienen email (NULL o vacío)
+        cursor.execute("""
+            SELECT DISTINCT
+                p.CardCode,
+                p.CardName,
+                p.FederalTaxID,
+                p.Instancia
+            FROM SAP_PROVEEDORES p
+            WHERE (p.EmailAddress IS NULL OR LTRIM(RTRIM(p.EmailAddress)) = '')
+            ORDER BY p.CardName, p.Instancia
+        """)
+        for row in cursor.fetchall():
+            resultados["inconsistencias"]["sin_email"].append({
+                "card_code": row[0],
+                "card_name": row[1][:200] if row[1] else "",
+                "rfc": row[2],
+                "instancia": row[3]
+            })
+
         # Enviar correo con el reporte
         if settings.EMAIL_SUPERVISOR:
             email_result = enviar_correo_inconsistencias(resultados)
@@ -1315,6 +1337,7 @@ def enviar_correo_inconsistencias(resultados: dict) -> dict:
         f"3. Diferentes CardCodes entre instancias: {len(inc['diferentes_cardcodes_por_instancia']):,} casos",
         f"4. Proveedores con CardName NULL: {inc['cardname_null']:,}",
         f"5. Proveedores con RFC NULL: {inc['rfc_null']:,}",
+        f"6. Proveedores sin EmailAddress: {len(inc['sin_email']):,} casos",
         "",
         "Adjunto encontrará un archivo Excel con el detalle completo de todas las inconsistencias.",
         ""
@@ -1345,6 +1368,7 @@ def enviar_correo_inconsistencias(resultados: dict) -> dict:
     ws_resumen.append(["Diferentes CardCodes entre instancias", len(inc['diferentes_cardcodes_por_instancia'])])
     ws_resumen.append(["Proveedores con CardName NULL", inc['cardname_null']])
     ws_resumen.append(["Proveedores con RFC NULL", inc['rfc_null']])
+    ws_resumen.append(["Proveedores sin EmailAddress", len(inc['sin_email'])])
 
     # Aplicar estilo al encabezado de la tabla
     for cell in ws_resumen[7]:
@@ -1419,6 +1443,28 @@ def enviar_correo_inconsistencias(resultados: dict) -> dict:
         ws_cardcodes.column_dimensions['C'].width = 20
         ws_cardcodes.column_dimensions['D'].width = 20
         ws_cardcodes.column_dimensions['E'].width = 80
+
+    # Hoja 5: Proveedores sin EmailAddress
+    if inc["sin_email"]:
+        ws_email = wb.create_sheet("Sin Email")
+        ws_email.append(["CardCode", "Nombre", "RFC", "Instancia"])
+        for cell in ws_email[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+
+        for item in inc["sin_email"]:
+            ws_email.append([
+                item['card_code'],
+                item['card_name'],
+                item['rfc'],
+                item['instancia']
+            ])
+
+        ws_email.column_dimensions['A'].width = 15
+        ws_email.column_dimensions['B'].width = 60
+        ws_email.column_dimensions['C'].width = 20
+        ws_email.column_dimensions['D'].width = 20
 
     # Guardar Excel en memoria
     excel_buffer = BytesIO()

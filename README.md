@@ -692,6 +692,7 @@ El sistema incluye una función interna `analizar_inconsistencias_maestro_provee
 2. **Mismo nombre con diferentes RFCs**: Proveedores con el mismo nombre pero RFCs diferentes
 3. **Diferentes CardCodes entre instancias**: Mismo proveedor (RFC) con códigos diferentes en distintas instancias SAP
 4. **Valores NULL**: Proveedores sin CardName o sin RFC
+5. **Proveedores sin email**: Proveedores que no tienen EmailAddress registrado (NULL o vacío)
 
 ### Uso de la Función
 
@@ -725,6 +726,7 @@ RESUMEN DE INCONSISTENCIAS:
 3. Diferentes CardCodes entre instancias: 1,234 casos
 4. Proveedores con CardName NULL: 0
 5. Proveedores con RFC NULL: 0
+6. Proveedores sin EmailAddress: 1,500 casos
 
 Adjunto encontrará un archivo Excel con el detalle completo de todas las inconsistencias.
 ```
@@ -750,6 +752,11 @@ Tabla resumen con el total de cada tipo de inconsistencia.
 | RFC | Nombre | Códigos Diferentes | Total Instancias | Detalle CardCodes |
 |-----|--------|-------------------|------------------|-------------------|
 | ABC123456789 | PROVEEDOR EJEMPLO | 3 | 5 | AIRPORTS: N1000100 \| EXPANSION: N1000200 \| CINETICA: N1000300 |
+
+#### 5. Hoja "Sin Email"
+| CardCode | Nombre | RFC | Instancia |
+|----------|--------|-----|-----------|
+| N1000255 | PROVEEDOR SIN EMAIL | ABC123456789 | AIRPORTS |
 
 ### Características del Excel
 
