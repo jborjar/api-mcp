@@ -682,6 +682,92 @@ Respuesta:
 - Las columnas de instancias son dinámicas y se generan según las instancias existentes en SAP_PROVEEDORES
 - Un proveedor puede tener el mismo CardCode en múltiples instancias o CardCodes diferentes
 
+## Análisis de Inconsistencias
+
+El sistema incluye una función interna `analizar_inconsistencias_maestro_proveedores()` que detecta problemas de calidad de datos en el maestro de proveedores.
+
+### Tipos de Inconsistencias Detectadas
+
+1. **Mismo RFC+GroupCode con diferentes nombres**: Proveedores con el mismo RFC y grupo pero registrados con nombres distintos
+2. **Mismo nombre con diferentes RFCs**: Proveedores con el mismo nombre pero RFCs diferentes
+3. **Diferentes CardCodes entre instancias**: Mismo proveedor (RFC) con códigos diferentes en distintas instancias SAP
+4. **Valores NULL**: Proveedores sin CardName o sin RFC
+
+### Uso de la Función
+
+Esta función es de uso interno y no está expuesta como endpoint público. Se puede invocar desde código Python:
+
+```python
+from database import analizar_inconsistencias_maestro_proveedores
+
+resultado = analizar_inconsistencias_maestro_proveedores()
+```
+
+### Reporte Automático por Correo
+
+La función envía automáticamente un correo al `EMAIL_SUPERVISOR` configurado con:
+
+- **Resumen ejecutivo** con totales de cada tipo de inconsistencia
+- **TOP 10** de los casos más críticos por categoría
+- **Archivo JSON adjunto** con el detalle completo de todas las inconsistencias detectadas
+
+Ejemplo de resumen:
+
+```
+REPORTE DE INCONSISTENCIAS - MAESTRO DE PROVEEDORES
+================================================================================
+Fecha: 2026-01-20 04:54:08
+Total registros en vista: 7,627
+
+RESUMEN DE INCONSISTENCIAS:
+--------------------------------------------------------------------------------
+1. Mismo RFC+GroupCode, diferente nombre: 643 casos
+2. Mismo nombre, diferente RFC: 89 casos
+3. Diferentes CardCodes entre instancias: 1,234 casos
+4. Proveedores con CardName NULL: 0
+5. Proveedores con RFC NULL: 0
+```
+
+### Estructura del JSON
+
+El archivo JSON adjunto incluye:
+
+```json
+{
+  "fecha_analisis": "2026-01-20 04:54:08",
+  "total_registros_vista": 7627,
+  "inconsistencias": {
+    "mismo_rfc_diferente_nombre": [
+      {
+        "rfc": "XEXX010101000",
+        "group_code": 103,
+        "nombres_diferentes": 394,
+        "nombres": "LINEUP SYSTEMS || LEONARD GARY || ..."
+      }
+    ],
+    "mismo_nombre_diferente_rfc": [...],
+    "diferentes_cardcodes_por_instancia": [
+      {
+        "rfc": "ABC123456789",
+        "card_name": "PROVEEDOR EJEMPLO",
+        "codigos_diferentes": 3,
+        "total_instancias": 5,
+        "cardcodes": {
+          "AIRPORTS": "N1000100",
+          "EXPANSION": "N1000200",
+          "CINETICA": "N1000300"
+        }
+      }
+    ],
+    "cardname_null": 0,
+    "rfc_null": 0
+  },
+  "email_enviado": {
+    "success": true
+  }
+}
+```
+
 ## Servidor de Correo (Postfix)
 
 El proyecto incluye un contenedor Postfix para el envío de correos electrónicos. Por defecto está configurado para envío directo (sin relay).
