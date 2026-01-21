@@ -24,6 +24,11 @@ from database import (
     create_or_update_vista_maestro_proveedores,
     get_maestro_proveedores,
 )
+from session import (
+    get_active_sessions,
+    cleanup_expired_sessions,
+    invalidate_user_sessions,
+)
 from mcp import router as mcp_router
 
 app = FastAPI(
@@ -77,6 +82,52 @@ async def logout(
     if success:
         return {"message": "Sesión cerrada exitosamente"}
     return {"message": "Sesión no encontrada"}
+
+
+@app.get("/auth/sessions", tags=["Autenticación"])
+async def list_sessions(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Lista todas las sesiones activas del usuario actual.
+    Útil para ver desde qué dispositivos/ubicaciones está conectado.
+    """
+    sessions = get_active_sessions(username=current_user.sub)
+    return {
+        "username": current_user.sub,
+        "total_sessions": len(sessions),
+        "sessions": sessions
+    }
+
+
+@app.post("/auth/logout-all", tags=["Autenticación"])
+async def logout_all(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Cierra todas las sesiones del usuario actual.
+    Útil para cerrar sesión en todos los dispositivos.
+    """
+    count = invalidate_user_sessions(current_user.sub)
+    return {
+        "message": f"Se cerraron {count} sesiones",
+        "sessions_closed": count
+    }
+
+
+@app.post("/auth/cleanup", tags=["Autenticación"])
+async def cleanup_sessions(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Limpia sesiones expiradas de la base de datos.
+    Solo accesible por usuarios autenticados (mantenimiento).
+    """
+    count = cleanup_expired_sessions()
+    return {
+        "message": f"Se eliminaron {count} sesiones expiradas",
+        "sessions_cleaned": count
+    }
 
 
 @app.get("/health", tags=["Sistema"])
