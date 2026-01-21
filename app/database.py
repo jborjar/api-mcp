@@ -695,36 +695,164 @@ def get_proveedores_sl(
 def test_service_layer_all_instances(sap_empresas_result: dict | None = None, skip_email: bool = False) -> dict:
     """
     Prueba la conexión a Service Layer para todas las instancias de SAP.
-    Actualiza el campo SL en SAP_EMPRESAS y opcionalmente envía correo con resultados.
+    Actualiza los campos SL y SLP en SAP_EMPRESAS:
+    - SL: Service Layer de instancia productiva
+    - SLP: Service Layer de instancia de prueba (instancia_PRUEBAS)
+
+    Opcionalmente envía correo con resultados.
+
     sap_empresas_result: resultado de inicializa_sap_empresas() para incluir en el correo
     skip_email: si es True, no envía correo (para cuando se llama desde inicializa_datos)
     """
+    import concurrent.futures
     settings = get_settings()
-    empresas = get_empresas_sap()
+
+    # Obtener instancias con información de si tienen versión de prueba
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT Instancia, Prueba FROM SAP_EMPRESAS ORDER BY Instancia")
+    instancias_info = {row[0]: {"tiene_prueba": bool(row[1])} for row in cursor.fetchall()}
+    cursor.close()
+    conn.close()
 
     resultados = {
-        "exitosos": [],
-        "fallidos": []
+        "productivo": {
+            "exitosos": [],
+            "fallidos": []
+        },
+        "pruebas": {
+            "exitosos": [],
+            "fallidos": []
+        }
     }
 
-    for instancia in empresas:
-        resultado = test_service_layer_login(instancia)
-        if resultado["success"]:
-            resultados["exitosos"].append(instancia)
-            update_service_layer_status(instancia, True)
-        else:
-            resultados["fallidos"].append({
+    def test_instancia_productiva(instancia: str):
+        """Prueba login en instancia productiva."""
+        try:
+            resultado = test_service_layer_login(instancia)
+
+            # Actualizar SL en base de datos
+            conn_local = get_mssql_connection()
+            cursor_local = conn_local.cursor()
+            try:
+                cursor_local.execute(
+                    "UPDATE SAP_EMPRESAS SET SL = ? WHERE Instancia = ?",
+                    (1 if resultado["success"] else 0, instancia)
+                )
+                conn_local.commit()
+            finally:
+                cursor_local.close()
+                conn_local.close()
+
+            if resultado["success"]:
+                return {"instancia": instancia, "success": True, "tipo": "productivo"}
+            else:
+                return {
+                    "instancia": instancia,
+                    "success": False,
+                    "tipo": "productivo",
+                    "error": resultado.get("error", "Error desconocido")
+                }
+        except Exception as e:
+            return {
                 "instancia": instancia,
-                "error": resultado.get("error", "Error desconocido")
-            })
-            update_service_layer_status(instancia, False)
+                "success": False,
+                "tipo": "productivo",
+                "error": str(e)
+            }
+
+    def test_instancia_prueba(instancia: str):
+        """Prueba login en instancia de prueba (instancia_PRUEBAS)."""
+        try:
+            instancia_prueba = f"{instancia}_PRUEBAS"
+            resultado = test_service_layer_login(instancia_prueba)
+
+            # Actualizar columna SLP
+            conn_local = get_mssql_connection()
+            cursor_local = conn_local.cursor()
+            try:
+                cursor_local.execute(
+                    "UPDATE SAP_EMPRESAS SET SLP = ? WHERE Instancia = ?",
+                    (1 if resultado["success"] else 0, instancia)
+                )
+                conn_local.commit()
+            finally:
+                cursor_local.close()
+                conn_local.close()
+
+            if resultado["success"]:
+                return {"instancia": instancia_prueba, "success": True, "tipo": "prueba"}
+            else:
+                return {
+                    "instancia": instancia_prueba,
+                    "success": False,
+                    "tipo": "prueba",
+                    "error": resultado.get("error", "Error desconocido")
+                }
+        except Exception as e:
+            return {
+                "instancia": f"{instancia}_PRUEBAS",
+                "success": False,
+                "tipo": "prueba",
+                "error": str(e)
+            }
+
+    # Ejecutar pruebas en paralelo para mejorar performance
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = []
+
+        # Programar pruebas de instancias productivas
+        for instancia in instancias_info.keys():
+            futures.append(executor.submit(test_instancia_productiva, instancia))
+
+        # Programar pruebas de instancias de prueba (solo si tienen versión _PRUEBAS)
+        for instancia, info in instancias_info.items():
+            if info["tiene_prueba"]:
+                futures.append(executor.submit(test_instancia_prueba, instancia))
+
+        # Recolectar resultados
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                resultado = future.result(timeout=60)  # Timeout de 60 segundos por prueba
+                if resultado["tipo"] == "productivo":
+                    if resultado["success"]:
+                        resultados["productivo"]["exitosos"].append(resultado["instancia"])
+                    else:
+                        resultados["productivo"]["fallidos"].append({
+                            "instancia": resultado["instancia"],
+                            "error": resultado.get("error", "Error desconocido")
+                        })
+                else:  # prueba
+                    if resultado["success"]:
+                        resultados["pruebas"]["exitosos"].append(resultado["instancia"])
+                    else:
+                        resultados["pruebas"]["fallidos"].append({
+                            "instancia": resultado["instancia"],
+                            "error": resultado.get("error", "Error desconocido")
+                        })
+            except concurrent.futures.TimeoutError:
+                # Timeout - registrar como fallido
+                pass
+            except Exception as e:
+                # Error en el thread, registrar como fallido
+                pass
 
     resultado_final = {
-        "total": len(empresas),
-        "exitosos": len(resultados["exitosos"]),
-        "fallidos": len(resultados["fallidos"]),
-        "detalle_exitosos": resultados["exitosos"],
-        "detalle_fallidos": resultados["fallidos"]
+        "total_instancias": len(instancias_info),
+        "productivo": {
+            "total": len(instancias_info),
+            "exitosos": len(resultados["productivo"]["exitosos"]),
+            "fallidos": len(resultados["productivo"]["fallidos"]),
+            "detalle_exitosos": sorted(resultados["productivo"]["exitosos"]),
+            "detalle_fallidos": resultados["productivo"]["fallidos"]
+        },
+        "pruebas": {
+            "total": sum(1 for info in instancias_info.values() if info["tiene_prueba"]),
+            "exitosos": len(resultados["pruebas"]["exitosos"]),
+            "fallidos": len(resultados["pruebas"]["fallidos"]),
+            "detalle_exitosos": sorted(resultados["pruebas"]["exitosos"]),
+            "detalle_fallidos": resultados["pruebas"]["fallidos"]
+        }
     }
 
     # Enviar correo con resultados (solo si no se omite)
@@ -751,12 +879,6 @@ def enviar_correo_inicializacion(
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     subject = f"Inicializacion de datos - {fecha}"
 
-    # Construir lista de fallidos para el mensaje
-    fallidos_nombres = []
-    if service_layer_result:
-        fallidos_nombres = [f["instancia"] for f in service_layer_result.get("detalle_fallidos", [])]
-    fallidos_str = ", ".join(fallidos_nombres) if fallidos_nombres else "ninguno"
-
     # Construir cuerpo del mensaje
     body_lines = [
         "Inicializacion de datos realizada",
@@ -767,7 +889,27 @@ def enviar_correo_inicializacion(
         body_lines.append(f"SAP Empresas: {sap_empresas_result.get('insertados', 0)} insertadas")
 
     if service_layer_result:
-        body_lines.append(f"Service Layer: {service_layer_result.get('exitosos', 0)} exitosos, {service_layer_result.get('fallidos', 0)} fallidos ({fallidos_str})")
+        # Verificar si es el nuevo formato (con productivo y pruebas) o el antiguo
+        if "productivo" in service_layer_result:
+            # Nuevo formato
+            prod = service_layer_result.get("productivo", {})
+            pruebas = service_layer_result.get("pruebas", {})
+
+            # Fallidos productivo
+            fallidos_prod = [f["instancia"] for f in prod.get("detalle_fallidos", [])]
+            fallidos_prod_str = ", ".join(fallidos_prod) if fallidos_prod else "ninguno"
+
+            # Fallidos pruebas
+            fallidos_pruebas = [f["instancia"] for f in pruebas.get("detalle_fallidos", [])]
+            fallidos_pruebas_str = ", ".join(fallidos_pruebas) if fallidos_pruebas else "ninguno"
+
+            body_lines.append(f"Service Layer Productivo: {prod.get('exitosos', 0)} exitosos, {prod.get('fallidos', 0)} fallidos ({fallidos_prod_str})")
+            body_lines.append(f"Service Layer Pruebas: {pruebas.get('exitosos', 0)} exitosos, {pruebas.get('fallidos', 0)} fallidos ({fallidos_pruebas_str})")
+        else:
+            # Formato antiguo (compatibilidad)
+            fallidos_nombres = [f["instancia"] for f in service_layer_result.get("detalle_fallidos", [])]
+            fallidos_str = ", ".join(fallidos_nombres) if fallidos_nombres else "ninguno"
+            body_lines.append(f"Service Layer: {service_layer_result.get('exitosos', 0)} exitosos, {service_layer_result.get('fallidos', 0)} fallidos ({fallidos_str})")
 
     if sap_proveedores_result:
         total_actualizados = sap_proveedores_result.get('proveedores_actualizados', 0)
