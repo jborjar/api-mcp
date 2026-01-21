@@ -890,7 +890,8 @@ def test_service_layer_all_instances(sap_empresas_result: dict | None = None, sk
 def enviar_correo_inicializacion(
     sap_empresas_result: dict | None,
     service_layer_result: dict | None,
-    sap_proveedores_result: dict | None
+    sap_proveedores_result: dict | None,
+    analisis_actividad_result: dict | None = None
 ) -> dict:
     """
     Envía correo con los resultados de la inicialización de datos.
@@ -958,6 +959,24 @@ def enviar_correo_inicializacion(
             for inst in instancias_ordenadas:
                 body_lines.append(f"  {inst['instancia']}: {inst['proveedores']:,}")
 
+    if analisis_actividad_result and analisis_actividad_result.get('success'):
+        total_activos = analisis_actividad_result.get('total_activos', 0)
+        total_inactivos = analisis_actividad_result.get('total_inactivos', 0)
+        anos = analisis_actividad_result.get('anos_analizados', 0)
+
+        body_lines.append("")
+        body_lines.append(f"Analisis de actividad (ultimos {anos} anos):")
+        body_lines.append(f"  - Proveedores activos: {total_activos:,}")
+        body_lines.append(f"  - Proveedores inactivos: {total_inactivos:,}")
+
+        # Agregar desglose por instancia si está disponible
+        detalle_activos = analisis_actividad_result.get('detalle_activos', [])
+        if detalle_activos:
+            body_lines.append("")
+            body_lines.append("Desglose de proveedores activos por instancia:")
+            for det in detalle_activos:
+                body_lines.append(f"  {det['instancia']}: {det['total']:,}")
+
     body = "\n".join(body_lines)
 
     # Adjuntar JSON con resumen (sin desglose detallado de proveedores)
@@ -973,6 +992,8 @@ def enviar_correo_inicializacion(
             "proveedores_eliminados": sap_proveedores_result.get('proveedores_eliminados', 0),
             "errores": sap_proveedores_result.get('errores', [])
         }
+    if analisis_actividad_result:
+        full_result["analisis_actividad"] = analisis_actividad_result
 
     attachment = {
         "filename": f"inicializacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",

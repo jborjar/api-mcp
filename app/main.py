@@ -27,6 +27,7 @@ from database import (
     create_or_update_vista_maestro_proveedores,
     get_maestro_proveedores,
     get_proveedores_activos,
+    analizar_actividad_proveedores,
 )
 from session import (
     get_active_sessions,
@@ -261,6 +262,11 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
             initialization_jobs[job_id]["progress"] = "Poblando SAP_PROVEEDORES desde Service Layer..."
         resultado_proveedores = actualizar_sap_proveedores()
 
+        # Analizar actividad de proveedores
+        with jobs_lock:
+            initialization_jobs[job_id]["progress"] = "Analizando actividad de proveedores y creando tablas SAP_PROV_ACTIVOS/INACTIVOS..."
+        resultado_actividad = analizar_actividad_proveedores(anos=0)
+
         # Restaurar la sesión del usuario actual
         with jobs_lock:
             initialization_jobs[job_id]["progress"] = "Restaurando sesión del usuario..."
@@ -287,7 +293,8 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
             email_result = enviar_correo_inicializacion(
                 resultado_empresas,
                 resultado_sl,
-                resultado_proveedores
+                resultado_proveedores,
+                resultado_actividad
             )
         else:
             email_result = {"success": False, "error": "No hay destinatario configurado"}
@@ -300,6 +307,7 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
                 "sap_empresas": resultado_empresas,
                 "service_layer": resultado_sl,
                 "sap_proveedores": resultado_proveedores,
+                "analisis_actividad": resultado_actividad,
                 "email_enviado": email_result,
                 "session_restored": True
             }

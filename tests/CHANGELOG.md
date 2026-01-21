@@ -7,6 +7,42 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ---
 
+## [2.2.0] - 2026-01-21
+
+### 🎉 Análisis de Actividad de Proveedores en Inicialización
+
+Esta versión integra el análisis de actividad de proveedores en el proceso de inicialización asíncrono.
+
+### Added (Agregado)
+
+- **Integración de `analizar_actividad_proveedores()` en inicialización**
+  - Se ejecuta automáticamente después de `actualizar_sap_proveedores()`
+  - Crea tablas `SAP_PROV_ACTIVOS` y `SAP_PROV_INACTIVOS`
+  - Análisis basado en transacciones (OPCH, OPOR) de SAP HANA
+  - Resultados incluidos en el job result
+  - Mensaje de progreso: "Analizando actividad de proveedores y creando tablas SAP_PROV_ACTIVOS/INACTIVOS..."
+
+### Changed (Cambiado)
+
+- **Función `enviar_correo_inicializacion()`**
+  - Nuevo parámetro opcional: `analisis_actividad_result`
+  - Email incluye sección "Análisis de actividad"
+  - Muestra total de proveedores activos e inactivos
+  - Desglose por instancia de proveedores activos
+  - Resultados incluidos en archivo JSON adjunto
+
+- **Función `_run_inicializa_datos_background()`**
+  - Agrega paso de análisis de actividad
+  - Pasa `resultado_actividad` a `enviar_correo_inicializacion()`
+  - Incluye `analisis_actividad` en el result final del job
+
+### Performance (Rendimiento)
+
+- **Tiempo adicional en inicialización:** ~2-3 minutos adicionales (depende de cantidad de transacciones en HANA)
+- **Tablas creadas automáticamente:** SAP_PROV_ACTIVOS, SAP_PROV_INACTIVOS
+
+---
+
 ## [2.1.0] - 2026-01-21
 
 ### 🎉 Sistema de Proveedores Activos
@@ -259,29 +295,37 @@ Primera versión del sistema de inicialización con preservación automática de
 
 ## Comparación de Versiones
 
-| Característica | v0.1.0 | v1.0.0 | v1.1.0 | v2.0.0 | v2.1.0 |
-|----------------|--------|--------|--------|--------|--------|
-| Inicialización de BD | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Preservación de sesión | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Service Layer tests | ❌ | ❌ | ✅ (paralelo) | ✅ (paralelo) | ✅ (paralelo) |
-| SAP_PROVEEDORES | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Vistas SQL (productivo/pruebas) | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Ejecución asíncrona | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Job tracking | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Sin timeout 504 | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Consulta proveedores activos | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Característica | v0.1.0 | v1.0.0 | v1.1.0 | v2.0.0 | v2.1.0 | v2.2.0 |
+|----------------|--------|--------|--------|--------|--------|--------|
+| Inicialización de BD | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Preservación de sesión | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Service Layer tests | ❌ | ❌ | ✅ (paralelo) | ✅ (paralelo) | ✅ (paralelo) | ✅ (paralelo) |
+| SAP_PROVEEDORES | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Vistas SQL (productivo/pruebas) | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Ejecución asíncrona | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Job tracking | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Sin timeout 504 | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Consulta proveedores activos | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Análisis actividad en inicialización | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Tablas SAP_PROV_ACTIVOS/INACTIVOS | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
 ## Roadmap
+
+### v2.2.0 ✅ COMPLETADO (2026-01-21)
+
+**Análisis de Actividad en Inicialización:**
+- [x] Integración de `analizar_actividad_proveedores()` en proceso asíncrono
+- [x] Creación automática de tablas SAP_PROV_ACTIVOS y SAP_PROV_INACTIVOS
+- [x] Inclusión de resultados en email de notificación
+- [x] Resultados en job result final
 
 ### v2.1.0 ✅ COMPLETADO (2026-01-21)
 
 **Mejoras al Job Tracking:**
 - [x] Limpieza automática de jobs antiguos (> 24 horas)
 - [x] Endpoint para listar todos los jobs
-- [ ] Persistencia de jobs en base de datos (pospuesto a v2.2.0)
-- [ ] Endpoint para cancelar jobs en ejecución (pospuesto a v2.2.0)
 
 **Sistema de Proveedores Activos:**
 - [x] Endpoint GET /proveedores/activos
@@ -290,7 +334,7 @@ Primera versión del sistema de inicialización con preservación automática de
 - [x] Respeto del modo productivo/pruebas
 - [x] Documentación completa
 
-### v2.2.0 (Planificado)
+### v2.3.0 (Planificado)
 
 **Mejoras al Job Tracking:**
 - [ ] Persistencia de jobs en base de datos
@@ -360,4 +404,4 @@ Este changelog sigue las siguientes convenciones:
 ---
 
 **Última actualización:** 2026-01-21
-**Versión actual:** 2.0.0
+**Versión actual:** 2.2.0
