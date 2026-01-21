@@ -95,7 +95,11 @@ docker compose up -d
 
 ### Autenticación
 
-- `POST /auth/login` - Obtener token JWT
+- `POST /auth/login` - Obtener token de sesión (Session ID)
+- `POST /auth/logout` - Cerrar sesión actual
+- `GET /auth/sessions` - Listar sesiones activas del usuario
+- `POST /auth/logout-all` - Cerrar todas las sesiones del usuario
+- `POST /auth/cleanup` - Limpiar sesiones expiradas (mantenimiento)
 
 ### Sistema
 
@@ -106,30 +110,71 @@ docker compose up -d
 
 ### SAP HANA
 
-- `GET /empresas_registradas` - Listar empresas SAP B1 registradas en HANA (requiere JWT)
+- `GET /empresas_registradas` - Listar empresas SAP B1 registradas en HANA (requiere autenticación)
 
 ### MSSQL
 
-- `POST /inicializa_datos` - Inicializa las tablas SAP_EMPRESAS y SAP_PROVEEDORES (requiere JWT)
-- `POST /actualizar_empresas` - Actualiza SAP_EMPRESAS con datos de HANA (SAP es fuente de verdad, preserva ServiceLayer)
-- `POST /actualizar_proveedores` - Actualiza SAP_PROVEEDORES con datos de Service Layer (requiere JWT)
+- `POST /inicializa_datos` - Inicializa las tablas SAP_EMPRESAS y SAP_PROVEEDORES (requiere autenticación)
+- `POST /actualizar_empresas` - Actualiza SAP_EMPRESAS con datos de HANA (SAP es fuente de verdad, preserva SL)
+- `POST /actualizar_proveedores` - Actualiza SAP_PROVEEDORES con datos de Service Layer (requiere autenticación)
 
 ### SAP Service Layer
 
-- `GET /proveedores/{instancia}` - Obtener proveedores de una instancia SAP (requiere JWT)
-- `GET /test_service_layer` - Prueba conexión a Service Layer para todas las instancias SAP (requiere JWT)
-- `GET /maestro_proveedores` - Vista consolidada de proveedores con CardCode por instancia (requiere JWT)
+- `GET /proveedores/{instancia}` - Obtener proveedores de una instancia SAP (requiere autenticación)
+- `GET /test_service_layer` - Prueba conexión a Service Layer para todas las instancias SAP (requiere autenticación)
+- `GET /maestro_proveedores` - Vista consolidada de proveedores con CardCode por instancia (requiere autenticación)
 
-### MCP (requieren JWT con scopes específicos)
+### MCP (requieren autenticación con scopes específicos)
 
 - `POST /mcp/tools/list` - Listar herramientas disponibles (scope: `mcp:tools:list`)
 - `POST /mcp/tools/call` - Ejecutar herramienta (scope: `mcp:tools:call`)
 - `POST /mcp/resources/list` - Listar recursos disponibles (scope: `mcp:resources:list`)
 - `POST /mcp/resources/read` - Leer recurso (scope: `mcp:resources:read`)
 
+## Sistema de Autenticación
+
+La API utiliza **Session Tokens** almacenados en MSSQL con **renovación automática** (sliding expiration).
+
+### Características del Sistema de Sesiones
+
+- **Sliding Expiration**: La sesión se renueva automáticamente en cada petición
+- **Timeout configurable**: 30 minutos de inactividad por defecto (configurable en `JWT_EXPIRATION_MINUTES`)
+- **Control total**: Invalidar sesiones individual o masivamente
+- **Sin dependencias externas**: Usa MSSQL existente (no requiere Redis)
+- **Múltiples sesiones**: Un usuario puede tener varias sesiones activas simultáneamente
+
+### Tabla USER_SESSIONS
+
+```sql
+CREATE TABLE USER_SESSIONS (
+    SessionID NVARCHAR(100) PRIMARY KEY,
+    Username NVARCHAR(100) NOT NULL,
+    CreatedAt DATETIME NOT NULL,
+    LastActivity DATETIME NOT NULL,
+    Scopes NVARCHAR(500),
+    INDEX idx_username (Username),
+    INDEX idx_last_activity (LastActivity)
+)
+```
+
+### Flujo de Autenticación
+
+1. **Login**: Usuario se autentica y recibe un SessionID (UUID)
+2. **Cada petición**: El SessionID se valida y la sesión se renueva automáticamente
+3. **Inactividad**: Si pasan 30 minutos sin actividad, la sesión expira
+4. **Logout**: El usuario puede cerrar sesión manualmente
+
+### Comportamiento de Sliding Expiration
+
+**Ejemplo:**
+- Login a las 8:00 → Sesión expira a las 8:30
+- Petición a las 8:10 → Sesión se renueva, ahora expira a las 8:40
+- Petición a las 8:35 → Sesión se renueva, ahora expira a las 9:05
+- Si no hay actividad por 30 minutos, la sesión expira automáticamente
+
 ## Uso de la API
 
-### Obtener Token
+### Obtener Token (Login)
 
 ```bash
 curl -X POST http://localhost:8000/auth/login \
@@ -137,10 +182,65 @@ curl -X POST http://localhost:8000/auth/login \
   -d '{"username": "sa", "password": "tu_password"}'
 ```
 
+Respuesta:
+```json
+{
+  "access_token": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "token_type": "bearer"
+}
+```
+
 ### Usar Endpoints Protegidos
 
 ```bash
 curl http://localhost:8000/me \
+  -H "Authorization: Bearer <token>"
+```
+
+### Gestión de Sesiones
+
+#### Listar sesiones activas
+
+```bash
+curl http://localhost:8000/auth/sessions \
+  -H "Authorization: Bearer <token>"
+```
+
+Respuesta:
+```json
+{
+  "username": "sa",
+  "total_sessions": 2,
+  "sessions": [
+    {
+      "session_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "username": "sa",
+      "created_at": "2026-01-20T10:00:00",
+      "last_activity": "2026-01-20T10:30:00",
+      "scopes": ["mcp:tools:list", "mcp:tools:call", ...]
+    }
+  ]
+}
+```
+
+#### Cerrar sesión actual
+
+```bash
+curl -X POST http://localhost:8000/auth/logout \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Cerrar todas las sesiones
+
+```bash
+curl -X POST http://localhost:8000/auth/logout-all \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Limpiar sesiones expiradas (mantenimiento)
+
+```bash
+curl -X POST http://localhost:8000/auth/cleanup \
   -H "Authorization: Bearer <token>"
 ```
 
