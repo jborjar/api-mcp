@@ -1128,3 +1128,29 @@ El sistema de session tokens fue probado exhaustivamente, verificando:
 - Sistema completamente funcional y listo para producción
 
 Para más detalles, consultar el reporte completo en `tests/prueba_session_tokens.md`.
+
+### Pruebas de Preservación de Sesión en inicializa_datos
+
+**Archivo:** [tests/prueba_inicializa_datos_session_preservation.md](tests/prueba_inicializa_datos_session_preservation.md)
+
+**Fecha:** 2026-01-21
+
+**Resultado:** ✅ TODAS LAS PRUEBAS EXITOSAS
+
+El endpoint `/inicializa_datos` fue modificado para preservar la sesión del usuario cuando elimina y recrea la base de datos.
+
+**Escenarios probados:**
+
+1. ✅ Base de datos no existe: Login crea BD automáticamente
+2. ✅ Base de datos existe: inicializa_datos preserva sesión del usuario
+3. ✅ Múltiples ejecuciones: Token siempre permanece válido
+
+**Características verificadas:**
+- La sesión del usuario se restaura automáticamente con el mismo SessionID
+- El token permanece válido después de eliminar/recrear la base de datos
+- El sistema de autenticación funciona desde el primer momento (incluso sin BD)
+- No se requiere re-autenticación después de ejecutar inicializa_datos
+- 24 empresas insertadas correctamente en SAP_EMPRESAS
+- 21 de 24 instancias con Service Layer funcional
+
+Para más detalles, consultar el reporte completo en `tests/prueba_inicializa_datos_session_preservation.md`.
