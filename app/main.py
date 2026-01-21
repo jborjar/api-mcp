@@ -130,28 +130,22 @@ async def inicializa_datos(
     current_user: Annotated[TokenData, Depends(get_current_user)]
 ) -> dict:
     """
-    Inicializa las tablas SAP_EMPRESAS y SAP_PROVEEDORES.
+    Inicializa la base de datos y tabla SAP_EMPRESAS.
 
-    El modo (productivo/pruebas) se controla con el endpoint /pruebas/{valor}:
-    - /pruebas/0: modo productivo (usa instancias normales)
-    - /pruebas/1: modo pruebas (usa instancias con Prueba=1 y conecta a {instancia}_PRUEBAS)
+    Realiza las siguientes operaciones:
+    1. Elimina y recrea la base de datos desde cero
+    2. Crea la tabla SAP_EMPRESAS y la carga desde HANA
+    3. Verifica si existen versiones _PRUEBAS de cada instancia
+    4. Obtiene datos de OADM (PrintHeadr, CompnyAddr, TaxIdNum)
+    5. Prueba login/logout en Service Layer para cada instancia
+    6. Actualiza el campo ServiceLayer en SAP_EMPRESAS (1=éxito, 0=fallo)
     """
     resultado_empresas = inicializa_sap_empresas()
     resultado_sl = test_service_layer_all_instances(sap_empresas_result=resultado_empresas, skip_email=True)
-    resultado_proveedores = poblar_sap_proveedores()
-
-    # Actualizar vista maestro_proveedores
-    vista_actualizada = create_or_update_vista_maestro_proveedores()
-
-    # Enviar correo con todos los resultados (incluyendo desglose de proveedores)
-    email_result = enviar_correo_inicializacion(resultado_empresas, resultado_sl, resultado_proveedores)
-    resultado_sl["email_enviado"] = email_result
 
     return {
         "sap_empresas": resultado_empresas,
-        "service_layer": resultado_sl,
-        "sap_proveedores": resultado_proveedores,
-        "vista_maestro_proveedores": vista_actualizada
+        "service_layer": resultado_sl
     }
 
 

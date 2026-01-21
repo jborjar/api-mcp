@@ -30,6 +30,37 @@ def get_mssql_connection(database: str | None = None):
     return pyodbc.connect(connection_string)
 
 
+def drop_and_create_database() -> bool:
+    """
+    Elimina la base de datos si existe y la recrea desde cero.
+    Retorna True si se creó exitosamente.
+    """
+    settings = get_settings()
+
+    # Conectar a master para eliminar/crear la base de datos
+    conn = get_mssql_connection(database="master")
+    conn.autocommit = True
+    cursor = conn.cursor()
+
+    try:
+        # Eliminar base de datos si existe
+        cursor.execute(f"""
+            IF EXISTS (SELECT name FROM sys.databases WHERE name = '{settings.MSSQL_DATABASE}')
+            BEGIN
+                ALTER DATABASE [{settings.MSSQL_DATABASE}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                DROP DATABASE [{settings.MSSQL_DATABASE}];
+            END
+        """)
+
+        # Crear base de datos nueva
+        cursor.execute(f"CREATE DATABASE [{settings.MSSQL_DATABASE}]")
+
+        return True
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def ensure_database_exists() -> bool:
     """
     Verifica si la base de datos existe en MSSQL, si no existe la crea.
@@ -374,26 +405,21 @@ def get_oadm_data(schema_name: str) -> dict:
 def inicializa_sap_empresas() -> dict:
     """
     Inicializa la tabla SAP_EMPRESAS:
-    1. Verifica/crea la base de datos si no existe
-    2. Verifica/crea la tabla SAP_EMPRESAS si no existe
-    3. Elimina todos los registros existentes
-    4. Obtiene las instancias de HANA
-    5. Para cada instancia, verifica si existe versión _PRUEBAS
-    6. Obtiene datos de OADM
-    7. Inserta en SAP_EMPRESAS
+    1. Elimina y recrea la base de datos desde cero
+    2. Crea la tabla SAP_EMPRESAS
+    3. Obtiene las instancias de HANA
+    4. Para cada instancia, verifica si existe versión _PRUEBAS
+    5. Obtiene datos de OADM
+    6. Inserta en SAP_EMPRESAS
     """
-    # Asegurar que exista la base de datos y tabla
-    ensure_database_exists()
+    # Eliminar y recrear la base de datos
+    drop_and_create_database()
     ensure_table_sap_empresas_exists()
 
     empresas = get_empresas_sap()
 
     mssql_conn = get_mssql_connection()
     mssql_cursor = mssql_conn.cursor()
-
-    # Eliminar datos existentes
-    mssql_cursor.execute("DELETE FROM SAP_EMPRESAS")
-    mssql_conn.commit()
 
     insertados = 0
     errores = []
