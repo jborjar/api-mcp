@@ -9,6 +9,7 @@ from auth import (
     TokenResponse,
     create_access_token,
     get_current_user,
+    logout as logout_session,
 )
 from config import get_settings, get_modo_pruebas, set_modo_pruebas
 from database import (
@@ -63,6 +64,19 @@ async def login(request: LoginRequest) -> TokenResponse:
         detail="Credenciales inválidas",
         headers={"WWW-Authenticate": "Bearer"}
     )
+
+
+@app.post("/auth/logout", tags=["Autenticación"])
+async def logout(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Cierra la sesión del usuario invalidando su token.
+    """
+    success = logout_session(current_user.session_id)
+    if success:
+        return {"message": "Sesión cerrada exitosamente"}
+    return {"message": "Sesión no encontrada"}
 
 
 @app.get("/health", tags=["Sistema"])
