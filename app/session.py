@@ -8,7 +8,17 @@ from database import get_mssql_connection
 
 
 def ensure_sessions_table_exists() -> None:
-    """Crea la tabla USER_SESSIONS si no existe."""
+    """
+    Crea la base de datos (si no existe) y la tabla USER_SESSIONS (si no existe).
+    Esto permite que el sistema de autenticación funcione incluso si la base de datos
+    no ha sido inicializada aún.
+    """
+    from database import ensure_database_exists
+
+    # Primero asegurar que la base de datos existe
+    ensure_database_exists()
+
+    # Luego crear la tabla USER_SESSIONS si no existe
     conn = get_mssql_connection()
     cursor = conn.cursor()
 

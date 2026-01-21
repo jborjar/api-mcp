@@ -200,17 +200,50 @@ async def inicializa_datos(
     Realiza las siguientes operaciones:
     1. Elimina y recrea la base de datos desde cero
     2. Crea la tabla SAP_EMPRESAS y la carga desde HANA
-    3. Verifica si existen versiones _PRUEBAS de cada instancia
-    4. Obtiene datos de OADM (PrintHeadr, CompnyAddr, TaxIdNum)
-    5. Prueba login/logout en Service Layer para cada instancia
-    6. Actualiza el campo SL en SAP_EMPRESAS (1=éxito, 0=fallo)
+    3. Recrea la tabla USER_SESSIONS
+    4. Restaura la sesión del usuario actual
+    5. Verifica si existen versiones _PRUEBAS de cada instancia
+    6. Obtiene datos de OADM (PrintHeadr, CompnyAddr, TaxIdNum)
+    7. Prueba login/logout en Service Layer para cada instancia
+    8. Actualiza el campo SL en SAP_EMPRESAS (1=éxito, 0=fallo)
+
+    NOTA: Este endpoint recrea la base de datos completa, por lo que la sesión
+    del usuario se elimina y se vuelve a crear automáticamente.
     """
+    from session import create_session
+    import pyodbc
+    from datetime import datetime
+
+    # Guardar información de la sesión actual antes de eliminar la base de datos
+    session_id = current_user.session_id
+    username = current_user.sub
+    scopes = current_user.scopes
+
+    # Ejecutar inicialización (esto eliminará y recreará la base de datos)
     resultado_empresas = inicializa_sap_empresas()
     resultado_sl = test_service_layer_all_instances(sap_empresas_result=resultado_empresas, skip_email=True)
 
+    # Restaurar la sesión del usuario actual
+    # Insertar directamente con el mismo SessionID para que el token siga funcionando
+    from database import get_mssql_connection
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+    try:
+        now = datetime.now()
+        scopes_str = ",".join(scopes)
+        cursor.execute("""
+            INSERT INTO USER_SESSIONS (SessionID, Username, CreatedAt, LastActivity, Scopes)
+            VALUES (?, ?, ?, ?, ?)
+        """, (session_id, username, now, now, scopes_str))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
     return {
         "sap_empresas": resultado_empresas,
-        "service_layer": resultado_sl
+        "service_layer": resultado_sl,
+        "session_restored": True
     }
 
 
