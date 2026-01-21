@@ -818,13 +818,15 @@ El archivo Excel adjunto (`Actividad_Proveedores_Ultimos_N_Anos_YYYYMMDD_HHMMSS.
 #### 1. Hoja "Activos"
 Proveedores con actividad en el período especificado.
 
-| Nombre | RFC | Total Documentos | Instancias con Actividad | Última Fecha |
-|--------|-----|------------------|-------------------------|--------------|
-| PROVEEDOR ACTIVO SA DE CV | ABC123456789 | 45 | AIRPORTS, EXPANSION, CINETICA | 2026-01-15 |
+| CardName | FederalTaxID | CardCode | GroupCode | Total Documentos | Instancias con Actividad | Última Fecha |
+|----------|--------------|----------|-----------|------------------|-------------------------|--------------|
+| PROVEEDOR ACTIVO SA DE CV | ABC123456789 | N1000100, N1000200 | 101 | 45 | AIRPORTS, EXPANSION, CINETICA | 2026-01-15 |
 
 **Columnas:**
-- **Nombre**: Nombre del proveedor
-- **RFC**: RFC del proveedor
+- **CardName**: Nombre del proveedor (campo de base de datos)
+- **FederalTaxID**: RFC del proveedor (campo de base de datos)
+- **CardCode**: Códigos del proveedor en las instancias donde tiene actividad (separados por coma)
+- **GroupCode**: Código de grupo del proveedor
 - **Total Documentos**: Número total de facturas y órdenes de compra en todas las instancias
 - **Instancias con Actividad**: Lista de instancias SAP donde tiene documentos
 - **Última Fecha**: Fecha del documento más reciente
@@ -832,18 +834,54 @@ Proveedores con actividad en el período especificado.
 #### 2. Hoja "Inactivos"
 Proveedores sin actividad en el período especificado.
 
-| Nombre | RFC |
-|--------|-----|
-| PROVEEDOR INACTIVO SA DE CV | XYZ987654321 |
+| CardName | FederalTaxID | CardCode | GroupCode |
+|----------|--------------|----------|-----------|
+| PROVEEDOR INACTIVO SA DE CV | XYZ987654321 | N1000300, N1000400 | 102 |
 
 **Columnas:**
-- **Nombre**: Nombre del proveedor
-- **RFC**: RFC del proveedor
+- **CardName**: Nombre del proveedor (campo de base de datos)
+- **FederalTaxID**: RFC del proveedor (campo de base de datos)
+- **CardCode**: Códigos del proveedor en todas las instancias (separados por coma)
+- **GroupCode**: Código de grupo del proveedor
 
 ### Criterios de Clasificación
 
 - **Activo**: Tiene al menos un documento (factura OPCH o orden de compra OPOR) en el período especificado en cualquier instancia SAP
 - **Inactivo**: No tiene ningún documento en el período especificado en ninguna instancia SAP
+
+### Tablas de Resultados
+
+La función crea/recrea dos tablas en MSSQL en cada ejecución:
+
+**SAP_PROV_ACTIVOS:**
+```sql
+CREATE TABLE SAP_PROV_ACTIVOS (
+    Instancia NVARCHAR(50) NOT NULL,
+    CardCode NVARCHAR(50) NOT NULL,
+    CardName NVARCHAR(200),
+    FederalTaxID NVARCHAR(50),
+    GroupCode INT,
+    TotalDocumentos INT,
+    UltimaFecha DATE,
+    FechaAnalisis DATETIME,
+    PRIMARY KEY (Instancia, CardCode)
+)
+```
+
+**SAP_PROV_INACTIVOS:**
+```sql
+CREATE TABLE SAP_PROV_INACTIVOS (
+    Instancia NVARCHAR(50) NOT NULL,
+    CardCode NVARCHAR(50) NOT NULL,
+    CardName NVARCHAR(200),
+    FederalTaxID NVARCHAR(50),
+    GroupCode INT,
+    FechaAnalisis DATETIME,
+    PRIMARY KEY (Instancia, CardCode)
+)
+```
+
+**Comportamiento:** Las tablas se eliminan (`DROP TABLE IF EXISTS`) y se recrean en cada ejecución para garantizar que la estructura esté actualizada y los datos sean frescos.
 
 ### Notas Técnicas
 
@@ -852,6 +890,8 @@ Proveedores sin actividad en el período especificado.
 - Si un proveedor tiene actividad en al menos una instancia, se considera activo
 - La última fecha mostrada corresponde al documento más reciente en todas las instancias
 - El total de documentos es la suma de facturas y órdenes en todas las instancias
+- El parámetro `anos` indica años adicionales hacia atrás (0=solo año actual, 1=actual+1 anterior, 2=actual+2 anteriores, etc.)
+- Las tablas SAP_PROV_ACTIVOS y SAP_PROV_INACTIVOS se eliminan y recrean completamente en cada ejecución
 
 ## Servidor de Correo (Postfix)
 
