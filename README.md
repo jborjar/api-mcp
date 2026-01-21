@@ -15,12 +15,15 @@
 │       ├── entrypoint_postfix.sh # Script de configuración Postfix
 │       └── requirements.txt     # Dependencias Python
 ├── app/                         # Código fuente FastAPI
-│   ├── auth.py                  # Autenticación JWT
+│   ├── auth.py                  # Autenticación con Session Tokens
 │   ├── config.py                # Configuración desde variables de entorno
 │   ├── database.py              # Conexiones a MSSQL y HANA
 │   ├── main.py                  # Punto de entrada de la API
 │   ├── mcp.py                   # Endpoints MCP
-│   └── sap_service_layer.py     # Cliente SAP B1 Service Layer
+│   ├── sap_service_layer.py     # Cliente SAP B1 Service Layer
+│   └── session.py               # Gestión de sesiones en MSSQL
+├── tests/                       # Reportes de pruebas
+│   └── prueba_session_tokens.md # Pruebas del sistema de sesiones
 ├── db/
 │   └── mssql/                   # Datos persistentes de MSSQL (generado)
 │       ├── .system/
@@ -1094,3 +1097,34 @@ El endpoint `/inicializa_datos` sincroniza aproximadamente 13,000+ proveedores d
 | SAP Proveedores | ~13,000 | 2-5 minutos |
 
 **Recomendación:** Usar un timeout de al menos 10 minutos para el endpoint `/inicializa_datos`.
+
+## Pruebas
+
+El proyecto incluye reportes detallados de las pruebas realizadas en el directorio `tests/`.
+
+### Pruebas del Sistema de Session Tokens
+
+**Archivo:** [tests/prueba_session_tokens.md](tests/prueba_session_tokens.md)
+
+**Fecha:** 2026-01-21
+
+**Resultado:** ✅ TODAS LAS PRUEBAS EXITOSAS
+
+El sistema de session tokens fue probado exhaustivamente, verificando:
+
+1. ✅ Login y creación de sesión
+2. ✅ Autenticación con token
+3. ✅ Sliding expiration (renovación automática)
+4. ✅ Listado de sesiones activas
+5. ✅ Logout individual
+6. ✅ Logout de todas las sesiones
+7. ✅ Limpieza de sesiones expiradas
+8. ✅ Múltiples sesiones concurrentes
+
+**Características verificadas:**
+- Sliding expiration funciona correctamente (LastActivity se actualiza en cada petición)
+- Tokens se invalidan inmediatamente al hacer logout
+- Múltiples sesiones por usuario soportadas
+- Sistema completamente funcional y listo para producción
+
+Para más detalles, consultar el reporte completo en `tests/prueba_session_tokens.md`.
