@@ -1,63 +1,98 @@
-from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from config import get_settings
+from session import create_session, validate_and_renew_session, invalidate_session
 
 security = HTTPBearer()
 
 
 class TokenData(BaseModel):
-    sub: str
+    """Datos del token/sesión del usuario."""
+    sub: str  # username
     scopes: list[str] = []
-    exp: datetime
+    session_id: str  # ID de sesión
 
 
 class TokenResponse(BaseModel):
-    access_token: str
+    """Respuesta del endpoint de login."""
+    access_token: str  # SessionID
     token_type: str = "bearer"
 
 
 class LoginRequest(BaseModel):
+    """Credenciales de login."""
     username: str
     password: str
 
 
 def create_access_token(subject: str, scopes: list[str] | None = None) -> str:
-    settings = get_settings()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRATION_MINUTES)
-    to_encode = {
-        "sub": subject,
-        "scopes": scopes or [],
-        "exp": expire
-    }
-    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    """
+    Crea una nueva sesión y retorna el SessionID como token.
+
+    Args:
+        subject: Username del usuario
+        scopes: Lista de permisos/scopes del usuario
+
+    Returns:
+        SessionID que funciona como token de acceso
+    """
+    return create_session(subject, scopes or [])
 
 
-def decode_token(token: str) -> TokenData:
+def validate_token(token: str) -> TokenData:
+    """
+    Valida el token (SessionID) y renueva la sesión si es válida.
+
+    Args:
+        token: SessionID a validar
+
+    Returns:
+        TokenData con información del usuario
+
+    Raises:
+        HTTPException: Si el token es inválido o expiró
+    """
     settings = get_settings()
-    try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        return TokenData(**payload)
-    except JWTError as e:
+    session_data = validate_and_renew_session(token, timeout_minutes=settings.JWT_EXPIRATION_MINUTES)
+
+    if not session_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido o expirado",
             headers={"WWW-Authenticate": "Bearer"}
-        ) from e
+        )
+
+    return TokenData(
+        sub=session_data["username"],
+        scopes=session_data["scopes"],
+        session_id=session_data["session_id"]
+    )
 
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]
 ) -> TokenData:
-    return decode_token(credentials.credentials)
+    """
+    Dependency para obtener el usuario actual desde el token.
+    Valida y renueva automáticamente la sesión.
+    """
+    return validate_token(credentials.credentials)
 
 
 def require_scope(required_scope: str):
+    """
+    Dependency para requerir un scope específico.
+
+    Args:
+        required_scope: Scope requerido para acceder al endpoint
+
+    Returns:
+        Dependency function que valida el scope
+    """
     async def scope_checker(
         current_user: Annotated[TokenData, Depends(get_current_user)]
     ) -> TokenData:
@@ -68,3 +103,16 @@ def require_scope(required_scope: str):
             )
         return current_user
     return scope_checker
+
+
+def logout(token: str) -> bool:
+    """
+    Invalida una sesión (logout).
+
+    Args:
+        token: SessionID a invalidar
+
+    Returns:
+        True si se invalidó correctamente
+    """
+    return invalidate_session(token)
