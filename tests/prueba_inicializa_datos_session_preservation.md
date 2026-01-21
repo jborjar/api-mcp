@@ -1,7 +1,12 @@
 # Prueba: Preservación de Sesión en /inicializa_datos
 
+> **NOTA:** Esta documentación describe la versión 1.0 (síncrona) del sistema.
+> Para la versión 2.0 (asíncrona con job tracking), consultar:
+> **[prueba_inicializa_datos_async_completo.md](prueba_inicializa_datos_async_completo.md)**
+
 **Fecha:** 2026-01-21
 **Branch:** Modifica-flujo-inicializa_datos
+**Versión:** 1.0 (Sistema Síncrono - OBSOLETO)
 **Commits relacionados:**
 - `db06b9e` - Fix inicializa_datos to recreate USER_SESSIONS table
 - `63b9512` - Garantizar funcionamiento de autenticación sin base de datos preexistente

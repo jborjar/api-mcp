@@ -1,6 +1,9 @@
 from typing import Annotated
+import uuid
+import threading
+from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 
 from auth import (
@@ -48,6 +51,48 @@ app.add_middleware(
 )
 
 app.include_router(mcp_router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Ejecuta tareas de inicialización al arrancar la aplicación."""
+    # Limpiar sesiones expiradas
+    cleanup_expired_sessions()
+    # Limpiar jobs antiguos (si hubo reinicio, los jobs en memoria se perdieron)
+    # Esta llamada no hará nada en el primer startup, pero es útil en recargas
+    cleanup_old_jobs()
+
+
+# Diccionario global para almacenar el estado de los jobs de inicialización
+# job_id -> {status, progress, result, error, created_at, completed_at}
+initialization_jobs = {}
+jobs_lock = threading.Lock()
+
+
+def cleanup_old_jobs():
+    """
+    Elimina jobs completados o fallidos que tengan más de 24 horas.
+    Mantiene jobs en ejecución (running) y pendientes (pending) sin importar su antigüedad.
+    """
+    from datetime import timedelta
+
+    now = datetime.now()
+    with jobs_lock:
+        jobs_to_remove = []
+        for job_id, job_info in initialization_jobs.items():
+            # Solo limpiar jobs completados o fallidos
+            if job_info["status"] in ["completed", "failed"]:
+                created_at = job_info.get("created_at")
+                if created_at and isinstance(created_at, datetime):
+                    age = now - created_at
+                    if age > timedelta(hours=24):
+                        jobs_to_remove.append(job_id)
+
+        # Eliminar jobs antiguos
+        for job_id in jobs_to_remove:
+            del initialization_jobs[job_id]
+
+        return len(jobs_to_remove)
 
 
 @app.post("/auth/login", response_model=TokenResponse, tags=["Autenticación"])
@@ -190,60 +235,213 @@ async def empresas_registradas(
     }
 
 
+def _run_inicializa_datos_background(job_id: str, session_id: str, username: str, scopes: list[str]):
+    """Función que se ejecuta en background para inicializar datos."""
+    from database import get_mssql_connection
+
+    try:
+        # Actualizar estado: iniciando
+        with jobs_lock:
+            initialization_jobs[job_id]["status"] = "running"
+            initialization_jobs[job_id]["progress"] = "Iniciando eliminación y recreación de base de datos..."
+
+        # Ejecutar inicialización (esto eliminará y recreará la base de datos)
+        with jobs_lock:
+            initialization_jobs[job_id]["progress"] = "Creando tablas SAP_EMPRESAS, SAP_PROVEEDORES y USER_SESSIONS..."
+        resultado_empresas = inicializa_sap_empresas()
+
+        # Prueba Service Layer
+        with jobs_lock:
+            initialization_jobs[job_id]["progress"] = "Probando conexión a Service Layer (productivo y pruebas)..."
+        resultado_sl = test_service_layer_all_instances(sap_empresas_result=resultado_empresas, skip_email=True)
+
+        # Poblar SAP_PROVEEDORES
+        with jobs_lock:
+            initialization_jobs[job_id]["progress"] = "Poblando SAP_PROVEEDORES desde Service Layer..."
+        resultado_proveedores = actualizar_sap_proveedores()
+
+        # Restaurar la sesión del usuario actual
+        with jobs_lock:
+            initialization_jobs[job_id]["progress"] = "Restaurando sesión del usuario..."
+        conn = get_mssql_connection()
+        cursor = conn.cursor()
+        try:
+            now = datetime.now()
+            scopes_str = ",".join(scopes)
+            cursor.execute("""
+                INSERT INTO USER_SESSIONS (SessionID, Username, CreatedAt, LastActivity, Scopes)
+                VALUES (?, ?, ?, ?, ?)
+            """, (session_id, username, now, now, scopes_str))
+            conn.commit()
+        finally:
+            cursor.close()
+            conn.close()
+
+        # Enviar correo con todos los resultados
+        with jobs_lock:
+            initialization_jobs[job_id]["progress"] = "Enviando correo con resultados..."
+        from config import get_settings
+        settings = get_settings()
+        if settings.EMAIL_SUPERVISOR:
+            email_result = enviar_correo_inicializacion(
+                resultado_empresas,
+                resultado_sl,
+                resultado_proveedores
+            )
+        else:
+            email_result = {"success": False, "error": "No hay destinatario configurado"}
+
+        # Marcar como completado
+        with jobs_lock:
+            initialization_jobs[job_id]["status"] = "completed"
+            initialization_jobs[job_id]["progress"] = "Inicialización completada exitosamente"
+            initialization_jobs[job_id]["result"] = {
+                "sap_empresas": resultado_empresas,
+                "service_layer": resultado_sl,
+                "sap_proveedores": resultado_proveedores,
+                "email_enviado": email_result,
+                "session_restored": True
+            }
+            initialization_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+
+    except Exception as e:
+        # Marcar como fallido
+        with jobs_lock:
+            initialization_jobs[job_id]["status"] = "failed"
+            initialization_jobs[job_id]["error"] = str(e)
+            initialization_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+
+
 @app.post("/inicializa_datos", tags=["MSSQL"])
 async def inicializa_datos(
+    background_tasks: BackgroundTasks,
     current_user: Annotated[TokenData, Depends(get_current_user)]
 ) -> dict:
     """
-    Inicializa la base de datos y tabla SAP_EMPRESAS.
+    Inicializa la base de datos completa de forma asíncrona.
 
-    Realiza las siguientes operaciones:
+    Este endpoint retorna inmediatamente un job_id que puede usarse para consultar
+    el progreso de la inicialización mediante GET /inicializa_datos/status/{job_id}
+
+    Operaciones realizadas en background:
     1. Elimina y recrea la base de datos desde cero
-    2. Crea la tabla SAP_EMPRESAS y la carga desde HANA
-    3. Recrea la tabla USER_SESSIONS
+    2. Crea las tablas SAP_EMPRESAS, SAP_PROVEEDORES y USER_SESSIONS
+    3. Carga SAP_EMPRESAS desde HANA
     4. Restaura la sesión del usuario actual
     5. Verifica si existen versiones _PRUEBAS de cada instancia
     6. Obtiene datos de OADM (PrintHeadr, CompnyAddr, TaxIdNum)
     7. Prueba login/logout en Service Layer para cada instancia
-    8. Actualiza el campo SL en SAP_EMPRESAS (1=éxito, 0=fallo)
+    8. Actualiza los campos SL y SLP en SAP_EMPRESAS (1=éxito, 0=fallo)
+    9. Puebla SAP_PROVEEDORES con datos del Service Layer
 
     NOTA: Este endpoint recrea la base de datos completa, por lo que la sesión
     del usuario se elimina y se vuelve a crear automáticamente.
     """
-    from session import create_session
-    import pyodbc
-    from datetime import datetime
+    # Generar job_id único
+    job_id = str(uuid.uuid4())
 
-    # Guardar información de la sesión actual antes de eliminar la base de datos
+    # Guardar información de la sesión actual
     session_id = current_user.session_id
     username = current_user.sub
     scopes = current_user.scopes
 
-    # Ejecutar inicialización (esto eliminará y recreará la base de datos)
-    resultado_empresas = inicializa_sap_empresas()
-    resultado_sl = test_service_layer_all_instances(sap_empresas_result=resultado_empresas, skip_email=True)
+    # Registrar job
+    with jobs_lock:
+        initialization_jobs[job_id] = {
+            "status": "pending",
+            "progress": "Trabajo en cola...",
+            "result": None,
+            "error": None,
+            "started_at": datetime.now().isoformat(),
+            "finished_at": None
+        }
 
-    # Restaurar la sesión del usuario actual
-    # Insertar directamente con el mismo SessionID para que el token siga funcionando
-    from database import get_mssql_connection
-    conn = get_mssql_connection()
-    cursor = conn.cursor()
-    try:
-        now = datetime.now()
-        scopes_str = ",".join(scopes)
-        cursor.execute("""
-            INSERT INTO USER_SESSIONS (SessionID, Username, CreatedAt, LastActivity, Scopes)
-            VALUES (?, ?, ?, ?, ?)
-        """, (session_id, username, now, now, scopes_str))
-        conn.commit()
-    finally:
-        cursor.close()
-        conn.close()
+    # Ejecutar en background
+    background_tasks.add_task(
+        _run_inicializa_datos_background,
+        job_id,
+        session_id,
+        username,
+        scopes
+    )
 
     return {
-        "sap_empresas": resultado_empresas,
-        "service_layer": resultado_sl,
-        "session_restored": True
+        "job_id": job_id,
+        "status": "pending",
+        "message": "Inicialización iniciada. Use GET /inicializa_datos/status/{job_id} para consultar el progreso",
+        "status_url": f"/inicializa_datos/status/{job_id}"
+    }
+
+
+@app.get("/inicializa_datos/status/{job_id}", tags=["MSSQL"])
+async def get_inicializa_datos_status(
+    job_id: str,
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Consulta el estado de un trabajo de inicialización.
+
+    Estados posibles:
+    - pending: El trabajo está en cola
+    - running: El trabajo está ejecutándose
+    - completed: El trabajo terminó exitosamente
+    - failed: El trabajo falló
+    """
+    with jobs_lock:
+        if job_id not in initialization_jobs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job ID {job_id} no encontrado"
+            )
+
+        job_info = initialization_jobs[job_id].copy()
+
+    return {
+        "job_id": job_id,
+        "status": job_info["status"],
+        "progress": job_info["progress"],
+        "started_at": job_info["started_at"],
+        "finished_at": job_info["finished_at"],
+        "result": job_info["result"] if job_info["status"] == "completed" else None,
+        "error": job_info["error"] if job_info["status"] == "failed" else None
+    }
+
+
+@app.get("/inicializa_datos/jobs", tags=["MSSQL"])
+async def list_initialization_jobs(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Lista todos los jobs de inicialización almacenados en memoria.
+    Útil para administración y debugging.
+    """
+    with jobs_lock:
+        jobs_summary = []
+        for job_id, job_info in initialization_jobs.items():
+            jobs_summary.append({
+                "job_id": job_id,
+                "status": job_info["status"],
+                "created_at": job_info.get("created_at"),
+                "completed_at": job_info.get("completed_at")
+            })
+
+    return {
+        "total_jobs": len(jobs_summary),
+        "jobs": sorted(jobs_summary, key=lambda x: x.get("created_at") or datetime.min, reverse=True)
+    }
+
+
+@app.post("/inicializa_datos/jobs/cleanup", tags=["MSSQL"])
+async def cleanup_initialization_jobs(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Limpia manualmente los jobs completados o fallidos que tengan más de 24 horas.
+    """
+    removed = cleanup_old_jobs()
+    return {
+        "message": f"Limpieza completada. {removed} job(s) eliminado(s).",
+        "jobs_removed": removed
     }
 
 

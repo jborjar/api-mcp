@@ -408,17 +408,24 @@ def inicializa_sap_empresas() -> dict:
     Inicializa la tabla SAP_EMPRESAS:
     1. Elimina y recrea la base de datos desde cero
     2. Crea la tabla SAP_EMPRESAS
-    3. Crea la tabla USER_SESSIONS (para el sistema de sesiones)
-    4. Obtiene las instancias de HANA
-    5. Para cada instancia, verifica si existe versión _PRUEBAS
-    6. Obtiene datos de OADM
-    7. Inserta en SAP_EMPRESAS
+    3. Crea la tabla SAP_PROVEEDORES
+    4. Crea la tabla USER_SESSIONS (para el sistema de sesiones)
+    5. Obtiene las instancias de HANA
+    6. Para cada instancia, verifica si existe versión _PRUEBAS
+    7. Obtiene datos de OADM
+    8. Inserta en SAP_EMPRESAS
     """
     from session import ensure_sessions_table_exists
 
     # Eliminar y recrear la base de datos
     drop_and_create_database()
+
+    # Pequeña pausa para asegurar que la base de datos esté completamente lista
+    import time
+    time.sleep(0.5)
+
     ensure_table_sap_empresas_exists()
+    ensure_table_sap_proveedores_exists()
 
     # Recrear tabla de sesiones (necesaria para el sistema de autenticación)
     ensure_sessions_table_exists()
@@ -459,6 +466,23 @@ def inicializa_sap_empresas() -> dict:
             insertados += 1
         except Exception as e:
             errores.append({"instancia": instancia, "error": str(e)})
+
+    mssql_conn.commit()
+
+    # Crear vistas para los modos de operación (productivo/pruebas)
+    mssql_cursor.execute("""
+        CREATE OR ALTER VIEW dbo.vw_productivo AS
+        SELECT Instancia, PrintHeadr, CompnyAddr, TaxIdNum
+        FROM SAP_EMPRESAS
+        WHERE SL = 1
+    """)
+
+    mssql_cursor.execute("""
+        CREATE OR ALTER VIEW dbo.vw_pruebas AS
+        SELECT Instancia, PrintHeadr, CompnyAddr, TaxIdNum
+        FROM SAP_EMPRESAS
+        WHERE SLP = 1 AND Prueba = 1
+    """)
 
     mssql_conn.commit()
     mssql_cursor.close()
@@ -960,8 +984,8 @@ def enviar_correo_inicializacion(
 
 def get_instancias_con_service_layer() -> list[str]:
     """
-    Obtiene las instancias de SAP_EMPRESAS que tienen SL = 1.
-    En modo pruebas, solo retorna instancias que también tienen Prueba = 1.
+    Obtiene las instancias que tienen Service Layer habilitado.
+    Usa las vistas vw_productivo o vw_pruebas según el modo actual.
     """
     from config import get_modo_pruebas
 
@@ -969,9 +993,11 @@ def get_instancias_con_service_layer() -> list[str]:
     cursor = conn.cursor()
     try:
         if get_modo_pruebas():
-            cursor.execute("SELECT Instancia FROM SAP_EMPRESAS WHERE SL = 1 AND Prueba = 1")
+            # Modo pruebas: usar vw_pruebas (instancias con SLP=1 y Prueba=1)
+            cursor.execute("SELECT Instancia FROM vw_pruebas")
         else:
-            cursor.execute("SELECT Instancia FROM SAP_EMPRESAS WHERE SL = 1")
+            # Modo productivo: usar vw_productivo (instancias con SL=1)
+            cursor.execute("SELECT Instancia FROM vw_productivo")
         rows = cursor.fetchall()
         return [row[0] for row in rows]
     finally:
