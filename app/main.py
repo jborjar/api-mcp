@@ -26,6 +26,7 @@ from database import (
     actualizar_sap_proveedores,
     create_or_update_vista_maestro_proveedores,
     get_maestro_proveedores,
+    get_proveedores_activos,
 )
 from session import (
     get_active_sessions,
@@ -547,4 +548,62 @@ async def maestro_proveedores(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=resultado.get("error", "Error al consultar maestro de proveedores")
         )
+    return resultado
+
+
+@app.get("/proveedores/activos", tags=["Proveedores"])
+async def proveedores_activos(
+    current_user: Annotated[TokenData, Depends(get_current_user)],
+    instancia: str | None = None,
+    limit: int | None = None,
+    offset: int = 0
+) -> dict:
+    """
+    Obtiene proveedores activos desde SAP_PROVEEDORES.
+
+    Un proveedor es considerado activo si:
+    - Valid = 'Y' (válido en SAP)
+    - Frozen = 'N' (no está congelado)
+
+    **IMPORTANTE:** Este endpoint respeta el modo actual (productivo/pruebas):
+    - En modo **productivo**: retorna proveedores de instancias con SL=1
+    - En modo **pruebas**: retorna proveedores de instancias con SLP=1 y Prueba=1
+
+    Para cambiar el modo, usar los endpoints:
+    - `POST /pruebas` (activar modo pruebas)
+    - `DELETE /pruebas` (activar modo productivo)
+
+    Parámetros:
+    - **instancia**: Filtrar por una instancia específica (opcional)
+    - **limit**: Limitar número de resultados (opcional)
+    - **offset**: Saltar N registros para paginación (opcional, por defecto 0)
+
+    Retorna:
+    - **success**: Indica si la operación fue exitosa
+    - **modo**: Modo actual ("productivo" o "pruebas")
+    - **total**: Total de proveedores activos
+    - **count**: Cantidad de proveedores retornados en esta página
+    - **limit**: Límite aplicado (si se especificó)
+    - **offset**: Offset aplicado
+    - **proveedores**: Lista de proveedores activos
+    - **instancias_incluidas**: Lista de instancias incluidas en la consulta según el modo
+
+    Ejemplos de uso:
+    - `/proveedores/activos` - Todos los proveedores activos del modo actual
+    - `/proveedores/activos?instancia=EXPANSION` - Solo proveedores activos de EXPANSION
+    - `/proveedores/activos?limit=100&offset=0` - Primera página de 100 proveedores
+    - `/proveedores/activos?limit=100&offset=100` - Segunda página de 100 proveedores
+    """
+    resultado = get_proveedores_activos(
+        instancia=instancia,
+        limit=limit,
+        offset=offset
+    )
+
+    if not resultado["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=resultado.get("error", "Error al consultar proveedores activos")
+        )
+
     return resultado

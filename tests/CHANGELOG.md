@@ -7,6 +7,60 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ---
 
+## [2.1.0] - 2026-01-21
+
+### 🎉 Sistema de Proveedores Activos
+
+Esta versión agrega la capacidad de consultar proveedores activos de forma eficiente, respetando el modo actual (productivo/pruebas).
+
+### Added (Agregado)
+
+- **Función `get_proveedores_activos()` en database.py**
+  - Consulta proveedores con `Valid='Y'` AND `Frozen='N'`
+  - Respeta el modo actual (productivo/pruebas)
+  - Usa `get_instancias_con_service_layer()` para obtener instancias según modo
+  - Soporte para filtro por instancia específica
+  - Soporte para paginación con `limit` y `offset`
+  - Retorna total de proveedores activos
+  - Retorna lista de instancias incluidas en la consulta
+
+- **Nuevo Endpoint: GET /proveedores/activos**
+  - Consulta proveedores activos desde SAP_PROVEEDORES
+  - Query parameters: `instancia`, `limit`, `offset`
+  - Requiere autenticación
+  - Documentación completa en OpenAPI/Swagger
+
+### Documentation (Documentación)
+
+- Creado `proveedores_activos.md` (~800 líneas)
+  - Arquitectura del sistema
+  - Criterios de "proveedor activo"
+  - Ejemplos de uso completos
+  - Casos de uso reales
+  - Testing manual paso a paso
+  - Troubleshooting
+  - Performance y optimización
+
+- Actualizado `tests/README.md`
+  - Agregada sección "Sistema de Proveedores"
+  - Referencia al nuevo documento
+
+### Performance (Rendimiento)
+
+- **Consulta de proveedores activos:**
+  - Modo productivo (21 instancias): < 200ms para ~12,200 proveedores
+  - Modo pruebas (6 instancias): < 50ms para ~1,350 proveedores
+  - Filtro por instancia: < 30ms
+
+### Use Cases (Casos de Uso)
+
+1. **Frontend**: Selector de proveedores para formularios de compra
+2. **Integración**: Sincronización con sistemas externos
+3. **Reportes**: Estadísticas de proveedores activos por instancia
+4. **Auditoría**: Identificar instancias con alto porcentaje de inactivos
+
+---
+
 ## [2.0.0] - 2026-01-21
 
 ### 🎉 Versión Mayor - Sistema Asíncrono con Job Tracking
@@ -205,28 +259,48 @@ Primera versión del sistema de inicialización con preservación automática de
 
 ## Comparación de Versiones
 
-| Característica | v0.1.0 | v1.0.0 | v1.1.0 | v2.0.0 |
-|----------------|--------|--------|--------|--------|
-| Inicialización de BD | ✅ | ✅ | ✅ | ✅ |
-| Preservación de sesión | ❌ | ✅ | ✅ | ✅ |
-| Service Layer tests | ❌ | ❌ | ✅ (paralelo) | ✅ (paralelo) |
-| SAP_PROVEEDORES | ❌ | ❌ | ❌ | ✅ |
-| Vistas SQL (productivo/pruebas) | ❌ | ❌ | ❌ | ✅ |
-| Ejecución asíncrona | ❌ | ❌ | ❌ | ✅ |
-| Job tracking | ❌ | ❌ | ❌ | ✅ |
-| Sin timeout 504 | ❌ | ❌ | ❌ | ✅ |
+| Característica | v0.1.0 | v1.0.0 | v1.1.0 | v2.0.0 | v2.1.0 |
+|----------------|--------|--------|--------|--------|--------|
+| Inicialización de BD | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Preservación de sesión | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Service Layer tests | ❌ | ❌ | ✅ (paralelo) | ✅ (paralelo) | ✅ (paralelo) |
+| SAP_PROVEEDORES | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Vistas SQL (productivo/pruebas) | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Ejecución asíncrona | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Job tracking | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Sin timeout 504 | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Consulta proveedores activos | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
 ## Roadmap
 
-### v2.1.0 (Planificado)
+### v2.1.0 ✅ COMPLETADO (2026-01-21)
+
+**Mejoras al Job Tracking:**
+- [x] Limpieza automática de jobs antiguos (> 24 horas)
+- [x] Endpoint para listar todos los jobs
+- [ ] Persistencia de jobs en base de datos (pospuesto a v2.2.0)
+- [ ] Endpoint para cancelar jobs en ejecución (pospuesto a v2.2.0)
+
+**Sistema de Proveedores Activos:**
+- [x] Endpoint GET /proveedores/activos
+- [x] Filtro por instancia
+- [x] Paginación (limit/offset)
+- [x] Respeto del modo productivo/pruebas
+- [x] Documentación completa
+
+### v2.2.0 (Planificado)
 
 **Mejoras al Job Tracking:**
 - [ ] Persistencia de jobs en base de datos
-- [ ] Limpieza automática de jobs antiguos (> 24 horas)
-- [ ] Endpoint para listar todos los jobs
 - [ ] Endpoint para cancelar jobs en ejecución
+
+**Mejoras a Proveedores:**
+- [ ] Filtros adicionales (CardName, FederalTaxID, GroupCode)
+- [ ] Ordenamiento personalizable
+- [ ] Endpoint de estadísticas
+- [ ] Export a Excel/CSV
 
 **Mejoras a la Sincronización:**
 - [ ] Sincronización incremental de proveedores (solo cambios)

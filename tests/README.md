@@ -17,6 +17,12 @@ Este directorio contiene la documentación de pruebas y reportes del sistema API
 |-----------|-------------|--------|
 | [reporte_pruebas_session_tokens.md](reporte_pruebas_session_tokens.md) | Implementación del sistema de session tokens con sliding expiration | ✅ VIGENTE |
 
+### Sistema de Proveedores
+
+| Documento | Descripción | Estado |
+|-----------|-------------|--------|
+| [proveedores_activos.md](proveedores_activos.md) | Sistema de consulta de proveedores activos con modo productivo/pruebas | ✅ VIGENTE |
+
 ## Resumen Ejecutivo
 
 ### Sistema de Inicialización v2.0 (Asíncrono)

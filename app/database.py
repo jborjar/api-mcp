@@ -2040,3 +2040,154 @@ def enviar_correo_actividad_proveedores(anos: int) -> dict:
 def poblar_sap_proveedores() -> dict:
     """Alias de actualizar_sap_proveedores() para compatibilidad."""
     return actualizar_sap_proveedores()
+
+
+def get_proveedores_activos(
+    instancia: str | None = None,
+    limit: int | None = None,
+    offset: int = 0
+) -> dict:
+    """
+    Obtiene proveedores activos desde SAP_PROVEEDORES.
+    Un proveedor es considerado activo si:
+    - Valid = 'Y' (válido en SAP)
+    - Frozen = 'N' (no está congelado)
+
+    Respeta el modo actual (productivo/pruebas):
+    - En modo productivo: consulta proveedores de instancias con SL=1
+    - En modo pruebas: consulta proveedores de instancias con SLP=1 y Prueba=1
+
+    Parámetros:
+    - instancia: filtrar por una instancia específica (opcional)
+    - limit: limitar número de resultados (opcional)
+    - offset: saltar N registros (opcional, por defecto 0)
+
+    Retorna:
+    {
+        "success": True,
+        "modo": "productivo" | "pruebas",
+        "total": 1234,
+        "proveedores": [...],
+        "instancias_incluidas": ["EXPANSION", "HEARST", ...]
+    }
+    """
+    from config import get_modo_pruebas
+
+    modo_pruebas = get_modo_pruebas()
+    modo = "pruebas" if modo_pruebas else "productivo"
+
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Obtener lista de instancias según el modo
+        if instancia:
+            # Si se especifica una instancia, validar que esté en las instancias válidas del modo actual
+            instancias_validas = get_instancias_con_service_layer()
+            if instancia not in instancias_validas:
+                return {
+                    "success": False,
+                    "error": f"Instancia '{instancia}' no disponible en modo {modo}",
+                    "instancias_disponibles": instancias_validas
+                }
+            instancias_filtro = [instancia]
+        else:
+            # Obtener todas las instancias según el modo
+            instancias_filtro = get_instancias_con_service_layer()
+
+        if not instancias_filtro:
+            return {
+                "success": True,
+                "modo": modo,
+                "total": 0,
+                "proveedores": [],
+                "instancias_incluidas": []
+            }
+
+        # Construir query base con filtro de proveedores activos
+        # Valid = 'Y' (SAP usa 'Y'/'N' para boolean)
+        # Frozen = 'N'
+        placeholders = ", ".join(["?" for _ in instancias_filtro])
+
+        # Query para contar total
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM SAP_PROVEEDORES
+            WHERE Instancia IN ({placeholders})
+            AND Valid = 'Y'
+            AND Frozen = 'N'
+        """
+        cursor.execute(count_query, instancias_filtro)
+        total = cursor.fetchone()[0]
+
+        # Query para obtener proveedores
+        query = f"""
+            SELECT
+                Instancia,
+                CardCode,
+                CardName,
+                GroupCode,
+                FederalTaxID,
+                Phone1,
+                Phone2,
+                Fax,
+                Cellular,
+                EmailAddress,
+                ContactPerson,
+                Address,
+                Block,
+                ZipCode,
+                City,
+                County,
+                BillToState,
+                Country,
+                PayTermsGrpCode,
+                CreditLimit,
+                Currency,
+                Valid,
+                Frozen,
+                CurrentAccountBalance,
+                OpenDeliveryNotesBalance,
+                OpenOrdersBalance
+            FROM SAP_PROVEEDORES
+            WHERE Instancia IN ({placeholders})
+            AND Valid = 'Y'
+            AND Frozen = 'N'
+            ORDER BY Instancia, CardName
+            OFFSET ? ROWS
+        """
+
+        params = instancias_filtro + [offset]
+
+        if limit is not None:
+            query += " FETCH NEXT ? ROWS ONLY"
+            params.append(limit)
+
+        cursor.execute(query, params)
+
+        # Convertir resultados a lista de diccionarios
+        columns = [column[0] for column in cursor.description]
+        proveedores = []
+        for row in cursor.fetchall():
+            proveedor = dict(zip(columns, row))
+            proveedores.append(proveedor)
+
+        return {
+            "success": True,
+            "modo": modo,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "count": len(proveedores),
+            "proveedores": proveedores,
+            "instancias_incluidas": instancias_filtro
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+    finally:
+        cursor.close()
+        conn.close()
