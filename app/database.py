@@ -408,14 +408,20 @@ def inicializa_sap_empresas() -> dict:
     Inicializa la tabla SAP_EMPRESAS:
     1. Elimina y recrea la base de datos desde cero
     2. Crea la tabla SAP_EMPRESAS
-    3. Obtiene las instancias de HANA
-    4. Para cada instancia, verifica si existe versión _PRUEBAS
-    5. Obtiene datos de OADM
-    6. Inserta en SAP_EMPRESAS
+    3. Crea la tabla USER_SESSIONS (para el sistema de sesiones)
+    4. Obtiene las instancias de HANA
+    5. Para cada instancia, verifica si existe versión _PRUEBAS
+    6. Obtiene datos de OADM
+    7. Inserta en SAP_EMPRESAS
     """
+    from session import ensure_sessions_table_exists
+
     # Eliminar y recrear la base de datos
     drop_and_create_database()
     ensure_table_sap_empresas_exists()
+
+    # Recrear tabla de sesiones (necesaria para el sistema de autenticación)
+    ensure_sessions_table_exists()
 
     empresas = get_empresas_sap()
 
