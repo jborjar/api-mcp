@@ -606,7 +606,7 @@ El endpoint `GET /proveedores/{instancia}` obtiene los proveedores (BusinessPart
 
 Todas las peticiones a Service Layer incluyen por defecto:
 - **Parámetro:** `$inlinecount=allpages` - Retorna el conteo total de registros
-- **Header:** `Prefer: odata.maxpagesize=0` - Sin paginación (retorna todos los registros)
+- **Header:** `Prefer: odata.maxpagesize=N` - Donde N es el valor del parámetro `top` (si se proporciona) o 0 para retornar todos los registros sin paginación
 
 ### Campos retornados
 

@@ -628,7 +628,9 @@ def get_proveedores_sl(
             if top is not None:
                 endpoint += f"&$top={top}"
 
-            headers = {"Prefer": "odata.maxpagesize=0"}
+            # Usar top para maxpagesize si está presente, sino 0 (sin límite)
+            max_pagesize = top if top is not None else 0
+            headers = {"Prefer": f"odata.maxpagesize={max_pagesize}"}
             bp_response = client.get(
                 endpoint,
                 cookies={"B1SESSION": session_id},
