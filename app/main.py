@@ -138,7 +138,7 @@ async def inicializa_datos(
     3. Verifica si existen versiones _PRUEBAS de cada instancia
     4. Obtiene datos de OADM (PrintHeadr, CompnyAddr, TaxIdNum)
     5. Prueba login/logout en Service Layer para cada instancia
-    6. Actualiza el campo ServiceLayer en SAP_EMPRESAS (1=éxito, 0=fallo)
+    6. Actualiza el campo SL en SAP_EMPRESAS (1=éxito, 0=fallo)
     """
     resultado_empresas = inicializa_sap_empresas()
     resultado_sl = test_service_layer_all_instances(sap_empresas_result=resultado_empresas, skip_email=True)
@@ -158,7 +158,7 @@ async def actualizar_empresas(
     - Actualiza empresas existentes
     - Inserta nuevas empresas
     - Elimina empresas que ya no existen en HANA
-    - Preserva el campo ServiceLayer
+    - Preserva el campo SL
     """
     return actualizar_sap_empresas()
 

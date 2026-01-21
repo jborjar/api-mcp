@@ -108,8 +108,9 @@ def ensure_table_sap_empresas_exists() -> bool:
             cursor.execute("""
                 CREATE TABLE SAP_EMPRESAS (
                     Instancia NVARCHAR(100) NOT NULL,
+                    SL BIT NOT NULL DEFAULT 0,
                     Prueba BIT NOT NULL DEFAULT 0,
-                    ServiceLayer BIT NOT NULL DEFAULT 0,
+                    SLP BIT NOT NULL DEFAULT 0,
                     PrintHeadr NVARCHAR(255),
                     CompnyAddr NVARCHAR(500),
                     TaxIdNum NVARCHAR(50),
@@ -548,12 +549,12 @@ def send_email(to_email: str, subject: str, body: str, attachment: dict | None =
 
 def update_service_layer_status(instancia: str, status: bool) -> None:
     """
-    Actualiza el campo ServiceLayer en SAP_EMPRESAS para una instancia.
+    Actualiza el campo SL en SAP_EMPRESAS para una instancia.
     """
     mssql_conn = get_mssql_connection()
     mssql_cursor = mssql_conn.cursor()
     mssql_cursor.execute(
-        "UPDATE SAP_EMPRESAS SET ServiceLayer = ? WHERE Instancia = ?",
+        "UPDATE SAP_EMPRESAS SET SL = ? WHERE Instancia = ?",
         (1 if status else 0, instancia)
     )
     mssql_conn.commit()
@@ -688,7 +689,7 @@ def get_proveedores_sl(
 def test_service_layer_all_instances(sap_empresas_result: dict | None = None, skip_email: bool = False) -> dict:
     """
     Prueba la conexión a Service Layer para todas las instancias de SAP.
-    Actualiza el campo ServiceLayer en SAP_EMPRESAS y opcionalmente envía correo con resultados.
+    Actualiza el campo SL en SAP_EMPRESAS y opcionalmente envía correo con resultados.
     sap_empresas_result: resultado de inicializa_sap_empresas() para incluir en el correo
     skip_email: si es True, no envía correo (para cuando se llama desde inicializa_datos)
     """
@@ -811,7 +812,7 @@ def enviar_correo_inicializacion(
 
 def get_instancias_con_service_layer() -> list[str]:
     """
-    Obtiene las instancias de SAP_EMPRESAS que tienen ServiceLayer = 1.
+    Obtiene las instancias de SAP_EMPRESAS que tienen SL = 1.
     En modo pruebas, solo retorna instancias que también tienen Prueba = 1.
     """
     from config import get_modo_pruebas
@@ -820,9 +821,9 @@ def get_instancias_con_service_layer() -> list[str]:
     cursor = conn.cursor()
     try:
         if get_modo_pruebas():
-            cursor.execute("SELECT Instancia FROM SAP_EMPRESAS WHERE ServiceLayer = 1 AND Prueba = 1")
+            cursor.execute("SELECT Instancia FROM SAP_EMPRESAS WHERE SL = 1 AND Prueba = 1")
         else:
-            cursor.execute("SELECT Instancia FROM SAP_EMPRESAS WHERE ServiceLayer = 1")
+            cursor.execute("SELECT Instancia FROM SAP_EMPRESAS WHERE SL = 1")
         rows = cursor.fetchall()
         return [row[0] for row in rows]
     finally:
@@ -837,7 +838,7 @@ def actualizar_sap_empresas() -> dict:
     - Actualiza empresas existentes con datos de OADM
     - Inserta nuevas empresas
     - Elimina empresas que ya no existen en HANA
-    - Preserva el campo ServiceLayer existente
+    - Preserva el campo SL existente
     """
     # Asegurar que exista la base de datos y tabla
     ensure_database_exists()
@@ -880,13 +881,13 @@ def actualizar_sap_empresas() -> dict:
 
             # Verificar si ya existe en MSSQL
             mssql_cursor.execute(
-                "SELECT ServiceLayer FROM SAP_EMPRESAS WHERE Instancia = ?",
+                "SELECT SL FROM SAP_EMPRESAS WHERE Instancia = ?",
                 [instancia]
             )
             row = mssql_cursor.fetchone()
 
             if row is not None:
-                # UPDATE - preservar ServiceLayer
+                # UPDATE - preservar SL
                 mssql_cursor.execute(
                     """
                     UPDATE SAP_EMPRESAS
@@ -903,11 +904,11 @@ def actualizar_sap_empresas() -> dict:
                 )
                 resultados["actualizadas"] += 1
             else:
-                # INSERT - ServiceLayer en 0 por defecto
+                # INSERT - SL en 0 por defecto
                 mssql_cursor.execute(
                     """
-                    INSERT INTO SAP_EMPRESAS (Instancia, Prueba, ServiceLayer, PrintHeadr, CompnyAddr, TaxIdNum)
-                    VALUES (?, ?, 0, ?, ?, ?)
+                    INSERT INTO SAP_EMPRESAS (Instancia, SL, Prueba, SLP, PrintHeadr, CompnyAddr, TaxIdNum)
+                    VALUES (?, 0, ?, 0, ?, ?, ?)
                     """,
                     (
                         instancia,
@@ -932,7 +933,7 @@ def actualizar_sap_empresas() -> dict:
 def actualizar_sap_proveedores() -> dict:
     """
     Actualiza la tabla SAP_PROVEEDORES con los proveedores de todas las instancias
-    que tienen ServiceLayer habilitado en SAP_EMPRESAS.
+    que tienen SL habilitado en SAP_EMPRESAS.
     SAP Service Layer es la fuente de verdad.
     - Actualiza proveedores existentes
     - Inserta nuevos proveedores
