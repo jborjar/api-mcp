@@ -9,6 +9,7 @@ from auth import (
     TokenResponse,
     create_access_token,
     get_current_user,
+    logout as logout_session,
 )
 from config import get_settings, get_modo_pruebas, set_modo_pruebas
 from database import (
@@ -22,6 +23,11 @@ from database import (
     actualizar_sap_proveedores,
     create_or_update_vista_maestro_proveedores,
     get_maestro_proveedores,
+)
+from session import (
+    get_active_sessions,
+    cleanup_expired_sessions,
+    invalidate_user_sessions,
 )
 from mcp import router as mcp_router
 
@@ -63,6 +69,65 @@ async def login(request: LoginRequest) -> TokenResponse:
         detail="Credenciales inválidas",
         headers={"WWW-Authenticate": "Bearer"}
     )
+
+
+@app.post("/auth/logout", tags=["Autenticación"])
+async def logout(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Cierra la sesión del usuario invalidando su token.
+    """
+    success = logout_session(current_user.session_id)
+    if success:
+        return {"message": "Sesión cerrada exitosamente"}
+    return {"message": "Sesión no encontrada"}
+
+
+@app.get("/auth/sessions", tags=["Autenticación"])
+async def list_sessions(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Lista todas las sesiones activas del usuario actual.
+    Útil para ver desde qué dispositivos/ubicaciones está conectado.
+    """
+    sessions = get_active_sessions(username=current_user.sub)
+    return {
+        "username": current_user.sub,
+        "total_sessions": len(sessions),
+        "sessions": sessions
+    }
+
+
+@app.post("/auth/logout-all", tags=["Autenticación"])
+async def logout_all(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Cierra todas las sesiones del usuario actual.
+    Útil para cerrar sesión en todos los dispositivos.
+    """
+    count = invalidate_user_sessions(current_user.sub)
+    return {
+        "message": f"Se cerraron {count} sesiones",
+        "sessions_closed": count
+    }
+
+
+@app.post("/auth/cleanup", tags=["Autenticación"])
+async def cleanup_sessions(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """
+    Limpia sesiones expiradas de la base de datos.
+    Solo accesible por usuarios autenticados (mantenimiento).
+    """
+    count = cleanup_expired_sessions()
+    return {
+        "message": f"Se eliminaron {count} sesiones expiradas",
+        "sessions_cleaned": count
+    }
 
 
 @app.get("/health", tags=["Sistema"])
