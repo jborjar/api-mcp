@@ -1,6 +1,7 @@
 from typing import Annotated
 import uuid
 import threading
+import asyncio
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, status, BackgroundTasks
@@ -26,8 +27,8 @@ from database import (
     actualizar_sap_proveedores,
     create_or_update_vista_maestro_proveedores,
     get_maestro_proveedores,
-    get_proveedores_activos,
     analizar_actividad_proveedores,
+    get_mssql_connection,
 )
 from session import (
     get_active_sessions,
@@ -54,15 +55,66 @@ app.add_middleware(
 
 app.include_router(mcp_router)
 
+# Incluir router de web settings
+from websettings import router as websettings_router
+app.include_router(websettings_router)
+
+# Variable global para controlar el task de limpieza
+cleanup_task = None
+
+
+async def scheduled_cleanup():
+    """
+    Tarea de background que ejecuta limpieza periódica de sesiones y jobs.
+    Se ejecuta cada 1 hora.
+    """
+    while True:
+        try:
+            # Esperar 1 hora (3600 segundos)
+            await asyncio.sleep(3600)
+
+            # Ejecutar limpieza de sesiones expiradas
+            deleted_sessions = cleanup_expired_sessions()
+            print(f"[Cleanup] Sesiones expiradas eliminadas: {deleted_sessions}")
+
+            # Ejecutar limpieza de jobs antiguos
+            deleted_jobs = cleanup_old_jobs()
+            print(f"[Cleanup] Jobs antiguos eliminados: {deleted_jobs}")
+
+        except Exception as e:
+            print(f"[Cleanup] Error en limpieza programada: {e}")
+
 
 @app.on_event("startup")
 async def startup_event():
     """Ejecuta tareas de inicialización al arrancar la aplicación."""
-    # Limpiar sesiones expiradas
+    global cleanup_task
+
+    # Limpiar sesiones expiradas al inicio
     cleanup_expired_sessions()
-    # Limpiar jobs antiguos (si hubo reinicio, los jobs en memoria se perdieron)
-    # Esta llamada no hará nada en el primer startup, pero es útil en recargas
+
+    # Limpiar jobs antiguos al inicio
     cleanup_old_jobs()
+
+    # Iniciar tarea de limpieza programada (cada 1 hora)
+    cleanup_task = asyncio.create_task(scheduled_cleanup())
+    print("[Startup] Tarea de limpieza programada iniciada (cada 1 hora)")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Ejecuta tareas de limpieza al apagar la aplicación."""
+    global cleanup_task
+
+    # Cancelar la tarea de limpieza programada
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+    print("[Shutdown] Tarea de limpieza programada detenida")
 
 
 # Diccionario global para almacenar el estado de los jobs de inicialización
@@ -167,14 +219,20 @@ async def cleanup_sessions(
     current_user: Annotated[TokenData, Depends(get_current_user)]
 ) -> dict:
     """
-    Limpia sesiones expiradas de la base de datos.
+    Limpia sesiones expiradas y jobs antiguos de la base de datos.
     Solo accesible por usuarios autenticados (mantenimiento).
+
+    Esta limpieza también se ejecuta automáticamente cada 1 hora en segundo plano.
     """
-    count = cleanup_expired_sessions()
+    sessions_count = cleanup_expired_sessions()
+    jobs_count = cleanup_old_jobs()
     return {
-        "message": f"Se eliminaron {count} sesiones expiradas",
-        "sessions_cleaned": count
+        "message": f"Se eliminaron {sessions_count} sesiones expiradas y {jobs_count} jobs antiguos",
+        "sessions_cleaned": sessions_count,
+        "jobs_cleaned": jobs_count
     }
+
+
 
 
 @app.get("/health", tags=["Sistema"])
@@ -186,9 +244,40 @@ async def health_check() -> dict:
 async def get_me(
     current_user: Annotated[TokenData, Depends(get_current_user)]
 ) -> dict:
+    """
+    Retorna información completa del usuario autenticado y su sesión actual.
+    """
+    from session import get_active_sessions
+    from datetime import datetime, timedelta
+
+    # Obtener información completa de la sesión desde la BD
+    sessions = get_active_sessions(username=current_user.sub)
+
+    # Buscar la sesión actual
+    current_session = None
+    for session in sessions:
+        if session["session_id"] == current_user.session_id:
+            current_session = session
+            break
+
+    if not current_session:
+        # Si no se encuentra la sesión, devolver info básica
+        return {
+            "username": current_user.sub,
+            "scopes": current_user.scopes,
+            "session_id": current_user.session_id
+        }
+
+    # Calcular expiración (30 minutos desde última actividad)
+    last_activity = datetime.fromisoformat(current_session["last_activity"])
+    expires_at = last_activity + timedelta(minutes=30)
+
     return {
         "username": current_user.sub,
-        "scopes": current_user.scopes
+        "scopes": current_user.scopes,
+        "session_id": current_user.session_id,
+        "created_at": current_session["created_at"],
+        "expires_at": expires_at.isoformat()
     }
 
 
@@ -265,7 +354,7 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
         # Analizar actividad de proveedores
         with jobs_lock:
             initialization_jobs[job_id]["progress"] = "Analizando actividad de proveedores y creando tablas SAP_PROV_ACTIVOS/INACTIVOS..."
-        resultado_actividad = analizar_actividad_proveedores(anos=0)
+        resultado_actividad = analizar_actividad_proveedores()
 
         # Restaurar la sesión del usuario actual
         with jobs_lock:
@@ -559,59 +648,71 @@ async def maestro_proveedores(
     return resultado
 
 
-@app.get("/proveedores/activos", tags=["Proveedores"])
-async def proveedores_activos(
+@app.post("/proveedores/analizar-actividad", tags=["Proveedores"])
+async def analizar_actividad_proveedores_endpoint(
     current_user: Annotated[TokenData, Depends(get_current_user)],
-    instancia: str | None = None,
-    limit: int | None = None,
-    offset: int = 0
+    anos: int = 1
 ) -> dict:
     """
-    Obtiene proveedores activos desde SAP_PROVEEDORES.
+    Analiza la actividad de proveedores y crea/actualiza las tablas SAP_PROV_ACTIVOS y SAP_PROV_INACTIVOS.
 
-    Un proveedor es considerado activo si:
-    - Valid = 'Y' (válido en SAP)
-    - Frozen = 'N' (no está congelado)
+    Este endpoint ejecuta un análisis completo de actividad de proveedores basado en transacciones
+    de compras (OPCH - facturas) y órdenes de compra (OPOR) en SAP HANA.
 
-    **IMPORTANTE:** Este endpoint respeta el modo actual (productivo/pruebas):
-    - En modo **productivo**: retorna proveedores de instancias con SL=1
-    - En modo **pruebas**: retorna proveedores de instancias con SLP=1 y Prueba=1
+    **Parámetro `anos`:**
+    - **0**: Solo año actual (por ejemplo, 2026)
+    - **1**: Año actual + 1 año anterior (2 años en total: 2025-2026) [DEFAULT]
+    - **2**: Año actual + 2 años anteriores (3 años en total: 2024-2026)
+    - **N**: Año actual + N años anteriores
 
-    Para cambiar el modo, usar los endpoints:
-    - `POST /pruebas` (activar modo pruebas)
-    - `DELETE /pruebas` (activar modo productivo)
+    **Proceso ejecutado:**
+    1. Consulta transacciones OPCH y OPOR en SAP HANA para cada instancia
+    2. Identifica proveedores con actividad en el período especificado
+    3. Crea/actualiza tabla `SAP_PROV_ACTIVOS` con proveedores activos
+    4. Crea/actualiza tabla `SAP_PROV_INACTIVOS` con proveedores sin actividad
+    5. Envía reporte por email al supervisor
 
-    Parámetros:
-    - **instancia**: Filtrar por una instancia específica (opcional)
-    - **limit**: Limitar número de resultados (opcional)
-    - **offset**: Saltar N registros para paginación (opcional, por defecto 0)
+    **Importante:**
+    - Este proceso puede tardar varios minutos dependiendo del volumen de transacciones
+    - El análisis respeta el modo actual (productivo/pruebas)
+    - Se envía email automático con los resultados
 
-    Retorna:
-    - **success**: Indica si la operación fue exitosa
-    - **modo**: Modo actual ("productivo" o "pruebas")
-    - **total**: Total de proveedores activos
-    - **count**: Cantidad de proveedores retornados en esta página
-    - **limit**: Límite aplicado (si se especificó)
-    - **offset**: Offset aplicado
-    - **proveedores**: Lista de proveedores activos
-    - **instancias_incluidas**: Lista de instancias incluidas en la consulta según el modo
+    **Retorna:**
+    - **success**: Indica si el análisis fue exitoso
+    - **anos_analizados**: Años analizados (0=solo actual, 1=actual+1 anterior, etc.)
+    - **total_activos**: Total de proveedores con actividad detectada
+    - **total_inactivos**: Total de proveedores sin actividad
+    - **detalle_activos**: Desglose de proveedores activos por instancia
+    - **email_enviado**: Información sobre el envío del email de notificación
 
-    Ejemplos de uso:
-    - `/proveedores/activos` - Todos los proveedores activos del modo actual
-    - `/proveedores/activos?instancia=EXPANSION` - Solo proveedores activos de EXPANSION
-    - `/proveedores/activos?limit=100&offset=0` - Primera página de 100 proveedores
-    - `/proveedores/activos?limit=100&offset=100` - Segunda página de 100 proveedores
+    **Ejemplo de uso:**
+    ```bash
+    # Analizar solo año actual
+    POST /proveedores/analizar-actividad?anos=0
+
+    # Analizar año actual + 1 anterior (default)
+    POST /proveedores/analizar-actividad
+    POST /proveedores/analizar-actividad?anos=1
+
+    # Analizar últimos 3 años
+    POST /proveedores/analizar-actividad?anos=2
+    ```
     """
-    resultado = get_proveedores_activos(
-        instancia=instancia,
-        limit=limit,
-        offset=offset
-    )
+    try:
+        resultado = analizar_actividad_proveedores(anos=anos)
 
-    if not resultado["success"]:
+        if not resultado.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=resultado.get("error", "Error al analizar actividad de proveedores")
+            )
+
+        return resultado
+
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=resultado.get("error", "Error al consultar proveedores activos")
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error inesperado al analizar actividad: {str(e)}"
         )
 
-    return resultado
+

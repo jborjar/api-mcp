@@ -21,7 +21,8 @@
 │   ├── main.py                  # Punto de entrada de la API
 │   ├── mcp.py                   # Endpoints MCP
 │   ├── sap_service_layer.py     # Cliente SAP B1 Service Layer
-│   └── session.py               # Gestión de sesiones en MSSQL
+│   ├── session.py               # Gestión de sesiones en MSSQL
+│   └── websettings.py           # Interfaz web (login y ajustes)
 ├── tests/                       # Reportes de pruebas
 │   └── prueba_session_tokens.md # Pruebas del sistema de sesiones
 ├── db/
@@ -96,7 +97,9 @@ docker compose up -d
 
 ## Endpoints Disponibles
 
-### Autenticación
+Total de endpoints: **24**
+
+### Autenticación (5 endpoints)
 
 - `POST /auth/login` - Obtener token de sesión (Session ID)
 - `POST /auth/logout` - Cerrar sesión actual
@@ -104,35 +107,71 @@ docker compose up -d
 - `POST /auth/logout-all` - Cerrar todas las sesiones del usuario
 - `POST /auth/cleanup` - Limpiar sesiones expiradas (mantenimiento)
 
-### Sistema
+### Sistema (5 endpoints)
 
 - `GET /health` - Verificar estado del servicio
-- `GET /me` - Información del usuario autenticado
+- `GET /me` - Información del usuario autenticado y sesión actual
 - `GET /pruebas` - Consultar modo actual (productivo/pruebas)
 - `POST /pruebas/{valor}` - Establecer modo (0=productivo, 1=pruebas)
+- `GET /start` - Interfaz web con login y panel de ajustes
 
-### SAP HANA
+### SAP HANA (1 endpoint)
 
 - `GET /empresas_registradas` - Listar empresas SAP B1 registradas en HANA (requiere autenticación)
 
-### MSSQL
+### MSSQL (3 endpoints)
 
 - `POST /inicializa_datos` - Inicializa las tablas SAP_EMPRESAS y SAP_PROVEEDORES (requiere autenticación)
 - `POST /actualizar_empresas` - Actualiza SAP_EMPRESAS con datos de HANA (SAP es fuente de verdad, preserva SL)
 - `POST /actualizar_proveedores` - Actualiza SAP_PROVEEDORES con datos de Service Layer (requiere autenticación)
 
-### SAP Service Layer
+### SAP Service Layer (3 endpoints)
 
 - `GET /proveedores/{instancia}` - Obtener proveedores de una instancia SAP (requiere autenticación)
 - `GET /test_service_layer` - Prueba conexión a Service Layer para todas las instancias SAP (requiere autenticación)
 - `GET /maestro_proveedores` - Vista consolidada de proveedores con CardCode por instancia (requiere autenticación)
 
-### MCP (requieren autenticación con scopes específicos)
+### Análisis (3 endpoints)
+
+- `POST /proveedores/analizar-actividad` - Analiza actividad de proveedores en los últimos N años (requiere autenticación)
+- `GET /inicializa_datos/status/{job_id}` - Consulta el estado de un job de inicialización (requiere autenticación)
+- `GET /inicializa_datos/jobs` - Lista todos los jobs de inicialización (requiere autenticación)
+
+### MCP (4 endpoints - requieren autenticación con scopes específicos)
 
 - `POST /mcp/tools/list` - Listar herramientas disponibles (scope: `mcp:tools:list`)
 - `POST /mcp/tools/call` - Ejecutar herramienta (scope: `mcp:tools:call`)
 - `POST /mcp/resources/list` - Listar recursos disponibles (scope: `mcp:resources:list`)
 - `POST /mcp/resources/read` - Leer recurso (scope: `mcp:resources:read`)
+
+## Interfaz Web
+
+El sistema incluye una interfaz web accesible en `http://localhost:8000/start` que proporciona:
+
+### Características de la Interfaz Web
+
+- **Formulario de login integrado**: Autenticación directa desde el navegador
+- **Gestión de sesión con cookies**: Token almacenado en cookie con validez de 1 hora
+- **Panel de información del usuario**: Muestra datos de la sesión activa desde `/me`
+  - Nombre de usuario
+  - Session ID
+  - Fecha de creación de la sesión
+  - Fecha de expiración (calculada con sliding expiration)
+- **Panel de ajustes**: Selector de modo de operación (Productivo/Pruebas)
+- **Validación automática**: Verifica el token contra el servidor al cargar la página
+- **Diseño responsive**: Adaptado para escritorio y dispositivos móviles
+- **Logout integrado**: Cierra la sesión y limpia la cookie
+
+### Acceso a la Interfaz Web
+
+```bash
+# Navegador web
+http://localhost:8000/start
+```
+
+La interfaz valida automáticamente si existe una sesión activa (cookie) y muestra:
+- **Login form** si no hay sesión válida
+- **Panel autenticado** si la sesión es válida
 
 ## Sistema de Autenticación
 
@@ -198,6 +237,17 @@ Respuesta:
 ```bash
 curl http://localhost:8000/me \
   -H "Authorization: Bearer <token>"
+```
+
+Respuesta:
+```json
+{
+  "username": "sa",
+  "scopes": ["mcp:tools:list", "mcp:tools:call", "mcp:resources:list", "mcp:resources:read"],
+  "session_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "created_at": "2026-01-22T10:00:00",
+  "expires_at": "2026-01-22T10:30:00"
+}
 ```
 
 ### Gestión de Sesiones
@@ -479,9 +529,93 @@ CREATE TABLE SAP_PROVEEDORES (
 | Saldos | CurrentAccountBalance, OpenDeliveryNotesBalance, OpenOrdersBalance, OpenChecksBalance, OpenOpportunities |
 | Estado | Valid, Frozen, BlockDunning, BackOrder, PartialDelivery |
 
-## Endpoint inicializa_datos
+## Job Tracking para Inicialización de Datos
 
-El endpoint `POST /inicializa_datos` realiza las siguientes operaciones:
+El sistema de inicialización de datos utiliza un modelo asíncrono con tracking de jobs para permitir operaciones de larga duración.
+
+### POST /inicializa_datos - Iniciar proceso de inicialización
+
+Inicia un proceso asíncrono de inicialización y retorna inmediatamente un Job ID para monitorear el progreso.
+
+```bash
+curl -X POST http://localhost:8000/inicializa_datos \
+  -H "Authorization: Bearer <token>"
+```
+
+Respuesta:
+```json
+{
+  "job_id": "174f89bd-9f47-48c0-ac2f-2fc75f926ec8",
+  "message": "Inicialización iniciada. Use GET /inicializa_datos/status/{job_id} para consultar el progreso"
+}
+```
+
+### GET /inicializa_datos/status/{job_id} - Consultar estado de un job
+
+Consulta el estado actual de un job de inicialización específico.
+
+```bash
+curl http://localhost:8000/inicializa_datos/status/174f89bd-9f47-48c0-ac2f-2fc75f926ec8 \
+  -H "Authorization: Bearer <token>"
+```
+
+Respuesta (en progreso):
+```json
+{
+  "job_id": "174f89bd-9f47-48c0-ac2f-2fc75f926ec8",
+  "status": "running",
+  "message": "Sincronizando proveedores..."
+}
+```
+
+Respuesta (completado):
+```json
+{
+  "job_id": "174f89bd-9f47-48c0-ac2f-2fc75f926ec8",
+  "status": "completed",
+  "message": "Inicialización completada",
+  "result": {
+    "sap_empresas": {...},
+    "service_layer": {...},
+    "sap_proveedores": {...}
+  }
+}
+```
+
+### GET /inicializa_datos/jobs - Listar todos los jobs
+
+Lista todos los jobs de inicialización del usuario actual.
+
+```bash
+curl http://localhost:8000/inicializa_datos/jobs \
+  -H "Authorization: Bearer <token>"
+```
+
+Respuesta:
+```json
+{
+  "username": "sa",
+  "total_jobs": 3,
+  "jobs": [
+    {
+      "job_id": "174f89bd-9f47-48c0-ac2f-2fc75f926ec8",
+      "status": "completed",
+      "created_at": "2026-01-22T10:00:00",
+      "completed_at": "2026-01-22T10:05:30"
+    },
+    {
+      "job_id": "a2b3c4d5-...",
+      "status": "running",
+      "created_at": "2026-01-22T11:00:00",
+      "completed_at": null
+    }
+  ]
+}
+```
+
+## Endpoint inicializa_datos - Detalle del proceso
+
+El proceso de inicialización realiza las siguientes operaciones:
 
 1. **Verificación de infraestructura:**
    - Verifica si la base de datos existe, si no la crea
@@ -870,25 +1004,33 @@ Tabla resumen con el total de cada tipo de inconsistencia.
 
 ## Análisis de Actividad de Proveedores
 
-El sistema incluye una función interna `analizar_actividad_proveedores(anos)` que analiza la actividad de los proveedores en SAP Business One en los últimos N años.
+El endpoint `POST /proveedores/analizar-actividad` analiza la actividad de los proveedores en SAP Business One en los últimos N años.
 
 ### Funcionamiento
 
-La función revisa por cada proveedor en el maestro si tiene documentos de compra (facturas OPCH o órdenes de compra OPOR) en el período especificado, consultando todas las instancias SAP donde el proveedor está registrado.
+El endpoint revisa por cada proveedor en el maestro si tiene documentos de compra (facturas OPCH o órdenes de compra OPOR) en el período especificado, consultando todas las instancias SAP donde el proveedor está registrado.
 
-### Uso de la Función
+### Uso del Endpoint
 
-Esta función es de uso interno y no está expuesta como endpoint público. Se puede invocar desde código Python:
+```bash
+# Analizar año actual + 1 año anterior (default: anos=1)
+curl -X POST "http://localhost:8000/proveedores/analizar-actividad" \
+  -H "Authorization: Bearer <token>"
 
-```python
-from database import analizar_actividad_proveedores
+# Analizar solo el año actual (anos=0)
+curl -X POST "http://localhost:8000/proveedores/analizar-actividad?anos=0" \
+  -H "Authorization: Bearer <token>"
 
-# Analizar últimos 3 años (default)
-resultado = analizar_actividad_proveedores()
-
-# Analizar últimos 5 años
-resultado = analizar_actividad_proveedores(anos=5)
+# Analizar año actual + 2 años anteriores (anos=2)
+curl -X POST "http://localhost:8000/proveedores/analizar-actividad?anos=2" \
+  -H "Authorization: Bearer <token>"
 ```
+
+### Parámetros
+
+| Parámetro | Tipo | Default | Descripción |
+|-----------|------|---------|-------------|
+| `anos` | int | 1 | Años adicionales hacia atrás (0=solo año actual, 1=actual+1 anterior, 2=actual+2 anteriores) |
 
 ### Reporte Automático por Correo
 
@@ -921,9 +1063,9 @@ El archivo Excel adjunto (`Actividad_Proveedores_Ultimos_N_Anos_YYYYMMDD_HHMMSS.
 #### 1. Hoja "Activos"
 Proveedores con actividad en el período especificado.
 
-| CardName | FederalTaxID | CardCode | GroupCode | Total Documentos | Instancias con Actividad | Última Fecha |
-|----------|--------------|----------|-----------|------------------|-------------------------|--------------|
-| PROVEEDOR ACTIVO SA DE CV | ABC123456789 | N1000100, N1000200 | 101 | 45 | AIRPORTS, EXPANSION, CINETICA | 2026-01-15 |
+| CardName | FederalTaxID | CardCode | GroupCode | Total Documentos | Saldo Total | Instancias con Actividad | Última Fecha |
+|----------|--------------|----------|-----------|------------------|-------------|-------------------------|--------------|
+| PROVEEDOR ACTIVO SA DE CV | ABC123456789 | N1000100, N1000200 | 101 | 45 | 125,500.00 | AIRPORTS, EXPANSION, CINETICA | 2026-01-15 |
 
 **Columnas:**
 - **CardName**: Nombre del proveedor (campo de base de datos)
@@ -931,6 +1073,7 @@ Proveedores con actividad en el período especificado.
 - **CardCode**: Códigos del proveedor en las instancias donde tiene actividad (separados por coma)
 - **GroupCode**: Código de grupo del proveedor
 - **Total Documentos**: Número total de facturas y órdenes de compra en todas las instancias
+- **Saldo Total**: Saldo total de documentos (CurrentAccountBalance) sumado de todas las instancias
 - **Instancias con Actividad**: Lista de instancias SAP donde tiene documentos
 - **Última Fecha**: Fecha del documento más reciente
 
@@ -965,6 +1108,7 @@ CREATE TABLE SAP_PROV_ACTIVOS (
     FederalTaxID NVARCHAR(50),
     GroupCode INT,
     TotalDocumentos INT,
+    SaldoDocumentos DECIMAL(18,2),
     UltimaFecha DATE,
     FechaAnalisis DATETIME,
     PRIMARY KEY (Instancia, CardCode)

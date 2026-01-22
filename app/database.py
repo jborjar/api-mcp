@@ -13,6 +13,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from io import BytesIO
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 
 def get_mssql_connection(database: str | None = None):
@@ -959,24 +965,6 @@ def enviar_correo_inicializacion(
             for inst in instancias_ordenadas:
                 body_lines.append(f"  {inst['instancia']}: {inst['proveedores']:,}")
 
-    if analisis_actividad_result and analisis_actividad_result.get('success'):
-        total_activos = analisis_actividad_result.get('total_activos', 0)
-        total_inactivos = analisis_actividad_result.get('total_inactivos', 0)
-        anos = analisis_actividad_result.get('anos_analizados', 0)
-
-        body_lines.append("")
-        body_lines.append(f"Analisis de actividad (ultimos {anos} anos):")
-        body_lines.append(f"  - Proveedores activos: {total_activos:,}")
-        body_lines.append(f"  - Proveedores inactivos: {total_inactivos:,}")
-
-        # Agregar desglose por instancia si está disponible
-        detalle_activos = analisis_actividad_result.get('detalle_activos', [])
-        if detalle_activos:
-            body_lines.append("")
-            body_lines.append("Desglose de proveedores activos por instancia:")
-            for det in detalle_activos:
-                body_lines.append(f"  {det['instancia']}: {det['total']:,}")
-
     body = "\n".join(body_lines)
 
     # Adjuntar JSON con resumen (sin desglose detallado de proveedores)
@@ -992,8 +980,6 @@ def enviar_correo_inicializacion(
             "proveedores_eliminados": sap_proveedores_result.get('proveedores_eliminados', 0),
             "errores": sap_proveedores_result.get('errores', [])
         }
-    if analisis_actividad_result:
-        full_result["analisis_actividad"] = analisis_actividad_result
 
     attachment = {
         "filename": f"inicializacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
@@ -1704,13 +1690,13 @@ def enviar_correo_inconsistencias(resultados: dict) -> dict:
     return send_email(settings.EMAIL_SUPERVISOR, subject, body, attachment)
 
 
-def analizar_actividad_proveedores(anos: int = 0) -> dict:
+def analizar_actividad_proveedores(anos: int = 1) -> dict:
     """
     Analiza la actividad de proveedores y crea/actualiza tablas SAP_PROV_ACTIVOS y SAP_PROV_INACTIVOS.
 
     El parámetro 'anos' funciona así:
     - 0 = solo año actual
-    - 1 = año actual + 1 año anterior (2 años en total)
+    - 1 = año actual + 1 año anterior (2 años en total) [DEFAULT]
     - 2 = año actual + 2 años anteriores (3 años en total)
 
     Metodología:
@@ -1722,7 +1708,7 @@ def analizar_actividad_proveedores(anos: int = 0) -> dict:
     6. Envía reporte por correo
 
     Args:
-        anos: Años adicionales hacia atrás (0=solo actual, 1=actual+1 anterior, etc.)
+        anos: Años adicionales hacia atrás (0=solo actual, 1=actual+1 anterior [DEFAULT], etc.)
 
     Returns:
         dict con resultados del análisis
@@ -1754,6 +1740,7 @@ def analizar_actividad_proveedores(anos: int = 0) -> dict:
                 GroupCode INT,
                 TotalDocumentos INT,
                 UltimaFecha DATE,
+                SaldoDocumentos DECIMAL(18,2),
                 FechaAnalisis DATETIME,
                 PRIMARY KEY (Instancia, CardCode)
             )
@@ -1817,20 +1804,20 @@ def analizar_actividad_proveedores(anos: int = 0) -> dict:
                 for card_code, total_docs, ultima_fecha in cardcodes_activos:
                     # Obtener información del proveedor de SAP_PROVEEDORES
                     cursor_mssql.execute("""
-                        SELECT CardName, FederalTaxID, GroupCode
+                        SELECT CardName, FederalTaxID, GroupCode, CurrentAccountBalance
                         FROM SAP_PROVEEDORES
                         WHERE Instancia = ? AND CardCode = ?
                     """, [instancia, card_code])
 
                     result = cursor_mssql.fetchone()
                     if result:
-                        card_name, rfc, group_code = result
+                        card_name, rfc, group_code, saldo = result
 
                         cursor_mssql.execute("""
                             INSERT INTO SAP_PROV_ACTIVOS
-                            (Instancia, CardCode, CardName, FederalTaxID, GroupCode, TotalDocumentos, UltimaFecha, FechaAnalisis)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, GETDATE())
-                        """, [instancia, card_code, card_name, rfc, group_code, total_docs, ultima_fecha])
+                            (Instancia, CardCode, CardName, FederalTaxID, GroupCode, TotalDocumentos, UltimaFecha, SaldoDocumentos, FechaAnalisis)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
+                        """, [instancia, card_code, card_name, rfc, group_code, total_docs, ultima_fecha, saldo])
 
                         activos_instancia += 1
 
@@ -1914,7 +1901,8 @@ def enviar_correo_actividad_proveedores(anos: int) -> dict:
                 MAX(GroupCode) as GroupCode,
                 SUM(TotalDocumentos) as total_documentos,
                 STRING_AGG(Instancia, ', ') WITHIN GROUP (ORDER BY Instancia) as instancias,
-                MAX(UltimaFecha) as ultima_fecha
+                MAX(UltimaFecha) as ultima_fecha,
+                SUM(SaldoDocumentos) as saldo_total
             FROM SAP_PROV_ACTIVOS
             GROUP BY CardName, FederalTaxID
             ORDER BY CardName
@@ -1989,7 +1977,7 @@ def enviar_correo_actividad_proveedores(anos: int) -> dict:
         # Hoja 1: Activos
         ws_activos = wb.active
         ws_activos.title = "Activos"
-        ws_activos.append(["CardName", "FederalTaxID", "CardCode", "GroupCode", "Total Documentos", "Instancias con Actividad", "Última Fecha"])
+        ws_activos.append(["CardName", "FederalTaxID", "CardCode", "GroupCode", "Total Documentos", "Instancias con Actividad", "Última Fecha", "Saldo Total"])
 
         for cell in ws_activos[1]:
             cell.fill = header_fill
@@ -2004,7 +1992,8 @@ def enviar_correo_actividad_proveedores(anos: int) -> dict:
                 row[3],  # GroupCode
                 row[4],  # total_documentos
                 row[5],  # instancias
-                row[6].strftime("%Y-%m-%d") if row[6] else ""  # ultima_fecha
+                row[6].strftime("%Y-%m-%d") if row[6] else "",  # ultima_fecha
+                row[7] if row[7] is not None else 0.0  # saldo_total
             ])
 
         ws_activos.column_dimensions['A'].width = 60
@@ -2014,6 +2003,7 @@ def enviar_correo_actividad_proveedores(anos: int) -> dict:
         ws_activos.column_dimensions['E'].width = 20
         ws_activos.column_dimensions['F'].width = 40
         ws_activos.column_dimensions['G'].width = 15
+        ws_activos.column_dimensions['H'].width = 20
 
         # Hoja 2: Inactivos
         ws_inactivos = wb.create_sheet("Inactivos")
@@ -2063,152 +2053,5 @@ def poblar_sap_proveedores() -> dict:
     return actualizar_sap_proveedores()
 
 
-def get_proveedores_activos(
-    instancia: str | None = None,
-    limit: int | None = None,
-    offset: int = 0
-) -> dict:
-    """
-    Obtiene proveedores activos desde SAP_PROVEEDORES.
-    Un proveedor es considerado activo si:
-    - Valid = 'Y' (válido en SAP)
-    - Frozen = 'N' (no está congelado)
 
-    Respeta el modo actual (productivo/pruebas):
-    - En modo productivo: consulta proveedores de instancias con SL=1
-    - En modo pruebas: consulta proveedores de instancias con SLP=1 y Prueba=1
 
-    Parámetros:
-    - instancia: filtrar por una instancia específica (opcional)
-    - limit: limitar número de resultados (opcional)
-    - offset: saltar N registros (opcional, por defecto 0)
-
-    Retorna:
-    {
-        "success": True,
-        "modo": "productivo" | "pruebas",
-        "total": 1234,
-        "proveedores": [...],
-        "instancias_incluidas": ["EXPANSION", "HEARST", ...]
-    }
-    """
-    from config import get_modo_pruebas
-
-    modo_pruebas = get_modo_pruebas()
-    modo = "pruebas" if modo_pruebas else "productivo"
-
-    conn = get_mssql_connection()
-    cursor = conn.cursor()
-
-    try:
-        # Obtener lista de instancias según el modo
-        if instancia:
-            # Si se especifica una instancia, validar que esté en las instancias válidas del modo actual
-            instancias_validas = get_instancias_con_service_layer()
-            if instancia not in instancias_validas:
-                return {
-                    "success": False,
-                    "error": f"Instancia '{instancia}' no disponible en modo {modo}",
-                    "instancias_disponibles": instancias_validas
-                }
-            instancias_filtro = [instancia]
-        else:
-            # Obtener todas las instancias según el modo
-            instancias_filtro = get_instancias_con_service_layer()
-
-        if not instancias_filtro:
-            return {
-                "success": True,
-                "modo": modo,
-                "total": 0,
-                "proveedores": [],
-                "instancias_incluidas": []
-            }
-
-        # Construir query base con filtro de proveedores activos
-        # Valid = 'Y' (SAP usa 'Y'/'N' para boolean)
-        # Frozen = 'N'
-        placeholders = ", ".join(["?" for _ in instancias_filtro])
-
-        # Query para contar total
-        count_query = f"""
-            SELECT COUNT(*)
-            FROM SAP_PROVEEDORES
-            WHERE Instancia IN ({placeholders})
-            AND Valid = 'Y'
-            AND Frozen = 'N'
-        """
-        cursor.execute(count_query, instancias_filtro)
-        total = cursor.fetchone()[0]
-
-        # Query para obtener proveedores
-        query = f"""
-            SELECT
-                Instancia,
-                CardCode,
-                CardName,
-                GroupCode,
-                FederalTaxID,
-                Phone1,
-                Phone2,
-                Fax,
-                Cellular,
-                EmailAddress,
-                ContactPerson,
-                Address,
-                Block,
-                ZipCode,
-                City,
-                County,
-                BillToState,
-                Country,
-                PayTermsGrpCode,
-                CreditLimit,
-                Currency,
-                Valid,
-                Frozen,
-                CurrentAccountBalance,
-                OpenDeliveryNotesBalance,
-                OpenOrdersBalance
-            FROM SAP_PROVEEDORES
-            WHERE Instancia IN ({placeholders})
-            AND Valid = 'Y'
-            AND Frozen = 'N'
-            ORDER BY Instancia, CardName
-            OFFSET ? ROWS
-        """
-
-        params = instancias_filtro + [offset]
-
-        if limit is not None:
-            query += " FETCH NEXT ? ROWS ONLY"
-            params.append(limit)
-
-        cursor.execute(query, params)
-
-        # Convertir resultados a lista de diccionarios
-        columns = [column[0] for column in cursor.description]
-        proveedores = []
-        for row in cursor.fetchall():
-            proveedor = dict(zip(columns, row))
-            proveedores.append(proveedor)
-
-        return {
-            "success": True,
-            "modo": modo,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "count": len(proveedores),
-            "proveedores": proveedores,
-            "instancias_incluidas": instancias_filtro
-        }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
-    finally:
-        cursor.close()
-        conn.close()
