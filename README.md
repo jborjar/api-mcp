@@ -23,8 +23,10 @@
 │   ├── sap_service_layer.py     # Cliente SAP B1 Service Layer
 │   ├── session.py               # Gestión de sesiones en MSSQL
 │   └── websettings.py           # Interfaz web (login y ajustes)
-├── tests/                       # Reportes de pruebas
-│   └── prueba_session_tokens.md # Pruebas del sistema de sesiones
+├── tests/                       # Scripts y reportes de pruebas
+│   ├── test_completo_sistema.sh # Script de prueba completa automatizada
+│   ├── prueba_session_tokens.md # Pruebas del sistema de sesiones
+│   └── prueba_inicializa_datos_session_preservation.md
 ├── db/
 │   └── mssql/                   # Datos persistentes de MSSQL (generado)
 │       ├── .system/
@@ -1277,6 +1279,30 @@ El endpoint `/inicializa_datos` sincroniza aproximadamente 13,000+ proveedores d
 ## Pruebas
 
 El proyecto incluye reportes detallados de las pruebas realizadas en el directorio `tests/`.
+
+### Script de Prueba Completa del Sistema
+
+**Archivo:** [tests/test_completo_sistema.sh](tests/test_completo_sistema.sh)
+
+Script automatizado que ejecuta una prueba completa del flujo del sistema:
+
+1. **Autenticación**: Login y obtención de token
+2. **Inicialización de datos**: Ejecuta `/inicializa_datos` y monitorea el job
+3. **Análisis de actividad**: Prueba análisis con diferentes períodos de años
+4. **Consulta de maestro**: Obtiene lista consolidada de proveedores
+5. **Listado de jobs**: Verifica historial de ejecuciones
+6. **Logout**: Cierra la sesión
+
+**Ejecución:**
+```bash
+chmod +x tests/test_completo_sistema.sh
+./tests/test_completo_sistema.sh
+```
+
+**Requisitos:**
+- `curl` y `jq` instalados
+- API corriendo en `http://localhost:8000`
+- Credenciales válidas en el script
 
 ### Pruebas del Sistema de Session Tokens
 
