@@ -152,15 +152,30 @@ El sistema incluye una interfaz web accesible en `http://localhost:8000/start` q
 
 - **Formulario de login integrado**: Autenticación directa desde el navegador
 - **Gestión de sesión con cookies**: Token almacenado en cookie con validez de 1 hora
-- **Panel de información del usuario**: Muestra datos de la sesión activa desde `/me`
-  - Nombre de usuario
-  - Session ID
-  - Fecha de creación de la sesión
-  - Fecha de expiración (calculada con sliding expiration)
-- **Panel de ajustes**: Selector de modo de operación (Productivo/Pruebas)
+- **Diseño de 3 tarjetas independientes**:
+
+  1. **Tarjeta API MCP**:
+     - Indicador de sesión activa
+     - Visualización del token de sesión
+     - Botón para copiar token al portapapeles
+     - Botón de cerrar sesión
+
+  2. **Tarjeta INFORMACIÓN DEL USUARIO**:
+     - Nombre de usuario
+     - Session ID
+     - Fecha de creación de la sesión
+     - Fecha de expiración (calculada con sliding expiration)
+     - Scopes asignados al usuario
+
+  3. **Tarjeta AJUSTES**:
+     - Selector de modo de operación (Productivo/Pruebas)
+     - Configuración de sesiones activas por usuario (1, 2, 5)
+     - Selector de año para proveedores activos (últimos 10 años)
+     - Botón para iniciar base auxiliar
+
 - **Validación automática**: Verifica el token contra el servidor al cargar la página
-- **Diseño responsive**: Adaptado para escritorio y dispositivos móviles
-- **Logout integrado**: Cierra la sesión y limpia la cookie
+- **Diseño responsive**: Layout de 3 columnas en escritorio, adaptado para dispositivos móviles
+- **Centrado vertical**: Contenido de las tarjetas centrado verticalmente
 
 ### Acceso a la Interfaz Web
 
@@ -171,7 +186,7 @@ http://localhost:8000/start
 
 La interfaz valida automáticamente si existe una sesión activa (cookie) y muestra:
 - **Login form** si no hay sesión válida
-- **Panel autenticado** si la sesión es válida
+- **Panel autenticado con 3 tarjetas** si la sesión es válida
 
 ## Sistema de Autenticación
 

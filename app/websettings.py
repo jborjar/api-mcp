@@ -37,12 +37,18 @@ async def start_page():
                 padding: 20px;
             }
             .container {
+                background: transparent;
+                padding: 20px;
+                width: 100%;
+                max-width: 1400px;
+            }
+            .login-card {
                 background: white;
                 border-radius: 10px;
                 box-shadow: 0 10px 25px rgba(0,0,0,0.2);
                 padding: 40px;
-                width: 100%;
-                max-width: 900px;
+                max-width: 500px;
+                margin: 0 auto;
             }
             h1 {
                 color: #333;
@@ -163,38 +169,22 @@ async def start_page():
             .authenticated-view {
                 display: none;
             }
-            .logout-button {
-                margin-top: 20px;
-                padding: 10px;
-                background: #dc3545;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                cursor: pointer;
-                width: 100%;
-            }
-            .logout-button:hover {
-                background: #c82333;
-            }
-            .welcome-message {
-                text-align: center;
-                color: #28a745;
-                font-size: 16px;
-                font-weight: 600;
-                margin-bottom: 20px;
-            }
             .user-info-card {
-                background: #f8f9fa;
-                border-radius: 6px;
-                padding: 15px;
-                border-left: 4px solid #667eea;
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                border: 2px solid #667eea;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             }
             .user-info-card h3 {
-                font-size: 14px;
+                font-size: 16px;
                 color: #333;
                 margin-bottom: 15px;
-                font-weight: 600;
+                font-weight: 700;
+                text-align: center;
             }
             .info-row {
                 display: flex;
@@ -225,16 +215,21 @@ async def start_page():
                 margin: 2px;
             }
             .settings-card {
-                background: #fff3cd;
-                border-radius: 6px;
-                padding: 15px;
-                border-left: 4px solid #ffc107;
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                border: 2px solid #667eea;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
             }
             .settings-card h3 {
-                font-size: 14px;
-                color: #856404;
+                font-size: 16px;
+                color: #333;
                 margin-bottom: 15px;
-                font-weight: 600;
+                font-weight: 700;
+                text-align: center;
             }
             .setting-item {
                 margin-bottom: 15px;
@@ -245,41 +240,115 @@ async def start_page():
             .setting-label {
                 display: block;
                 font-weight: 600;
-                color: #856404;
-                font-size: 12px;
-                margin-bottom: 5px;
+                color: #555;
+                font-size: 13px;
+                margin-bottom: 8px;
             }
             .setting-input {
                 width: 100%;
-                padding: 8px;
-                border: 1px solid #ffc107;
-                border-radius: 4px;
-                font-size: 13px;
+                padding: 10px;
+                border: 2px solid #e0e0e0;
+                border-radius: 6px;
+                font-size: 14px;
+                transition: border-color 0.3s;
+            }
+            .setting-input:focus {
+                outline: none;
+                border-color: #667eea;
             }
             .setting-button {
-                padding: 8px 15px;
-                background: #ffc107;
-                color: #856404;
+                width: 100%;
+                padding: 10px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
                 border: none;
-                border-radius: 4px;
-                font-size: 12px;
+                border-radius: 6px;
+                font-size: 14px;
                 font-weight: 600;
                 cursor: pointer;
-                margin-top: 5px;
+                margin-top: 10px;
+                transition: transform 0.2s, box-shadow 0.2s;
             }
             .setting-button:hover {
-                background: #e0a800;
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            }
+            .setting-button:active {
+                transform: translateY(0);
             }
             .cards-container {
                 display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 25px;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 20px;
                 margin-bottom: 20px;
+                width: 100%;
             }
-            @media (max-width: 992px) {
-                .container {
-                    max-width: 600px;
-                }
+            .api-card {
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                border: 2px solid #667eea;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
+            .api-card h3 {
+                font-size: 16px;
+                color: #333;
+                margin-bottom: 10px;
+                font-weight: 700;
+                text-align: center;
+            }
+            .session-status {
+                text-align: center;
+                color: #28a745;
+                font-size: 16px;
+                font-weight: 600;
+                margin-bottom: 15px;
+            }
+            .api-card .logout-button {
+                width: 100%;
+                margin-top: 12px;
+                padding: 10px;
+                background: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            .api-card .logout-button:hover {
+                background: #c82333;
+            }
+            .token-info {
+                background: #f8f9fa;
+                border-radius: 6px;
+                padding: 12px;
+            }
+            .token-info .token-label {
+                font-size: 11px;
+                color: #666;
+                margin-bottom: 8px;
+                font-weight: 600;
+            }
+            .token-info .token-value {
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+                word-break: break-all;
+                background: white;
+                padding: 8px;
+                border-radius: 4px;
+                border: 1px solid #dee2e6;
+                margin-bottom: 8px;
+            }
+            .token-info .copy-button {
+                width: 100%;
+                margin-top: 5px;
+            }
+            @media (max-width: 1200px) {
                 .cards-container {
                     grid-template-columns: 1fr;
                 }
@@ -288,37 +357,49 @@ async def start_page():
     </head>
     <body>
         <div class="container">
-            <h1>API MCP</h1>
-            <p class="subtitle">Sistema de Gestión de Proveedores SAP</p>
-
             <!-- Vista de login -->
             <div id="loginView">
-                <form id="loginForm">
-                    <div class="form-group">
-                        <label for="username">Usuario</label>
-                        <input type="text" id="username" name="username" required autocomplete="username">
-                    </div>
+                <div class="login-card">
+                    <h1>API MCP</h1>
+                    <p class="subtitle">Sistema de Gestión de Proveedores SAP</p>
 
-                    <div class="form-group">
-                        <label for="password">Contraseña</label>
-                        <input type="password" id="password" name="password" required autocomplete="current-password">
-                    </div>
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label for="username">Usuario</label>
+                            <input type="text" id="username" name="username" required autocomplete="username">
+                        </div>
 
-                    <button type="submit" id="submitBtn">Autentificar</button>
-                </form>
+                        <div class="form-group">
+                            <label for="password">Contraseña</label>
+                            <input type="password" id="password" name="password" required autocomplete="current-password">
+                        </div>
 
-                <div id="message" class="message"></div>
+                        <button type="submit" id="submitBtn">Autentificar</button>
+                    </form>
+
+                    <div id="message" class="message"></div>
+                </div>
             </div>
 
             <!-- Vista autenticada -->
             <div id="authenticatedView" class="authenticated-view">
-                <div class="welcome-message">Sesión activa</div>
-
-                <!-- Contenedor de tarjetas en grid -->
+                <!-- Contenedor de las 3 tarjetas en grid -->
                 <div class="cards-container">
+                    <!-- Tarjeta API MCP -->
+                    <div class="api-card">
+                        <h3>API MCP</h3>
+                        <div class="session-status">Sesión activa</div>
+                        <div class="token-info">
+                            <div class="token-label">Token de Sesión:</div>
+                            <div class="token-value" id="tokenValue"></div>
+                            <button class="copy-button" onclick="copyToken()">Copiar Token</button>
+                        </div>
+                        <button class="logout-button" onclick="logout()">Cerrar Sesión</button>
+                    </div>
+
                     <!-- Tarjeta de información del usuario -->
                     <div class="user-info-card" id="userInfoCard">
-                        <h3>Información del Usuario</h3>
+                        <h3>INFORMACIÓN DEL USUARIO</h3>
                         <div class="info-row">
                             <span class="info-label">Usuario:</span>
                             <span class="info-value" id="infoUsername">-</span>
@@ -350,18 +431,24 @@ async def start_page():
                                 <option value="0">Productivo</option>
                                 <option value="1">Pruebas</option>
                             </select>
-                            <button class="setting-button" onclick="changeMode()">Cambiar Modo</button>
                         </div>
+                        <div class="setting-item">
+                            <label class="setting-label">Sesiones activas por usuario</label>
+                            <select class="setting-input" id="sessionLimitSelect">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="5">5</option>
+                            </select>
+                        </div>
+                        <div class="setting-item">
+                            <label class="setting-label">Proveedores activos desde</label>
+                            <select class="setting-input" id="yearSelect">
+                                <!-- Se llenará dinámicamente con JavaScript -->
+                            </select>
+                        </div>
+                        <button class="setting-button" onclick="changeMode()">Iniciar Base Auxiliar</button>
                     </div>
                 </div>
-
-                <div class="token-container" style="display: block;">
-                    <div class="token-label">Token de Sesión:</div>
-                    <div class="token-value" id="tokenValue"></div>
-                    <button class="copy-button" onclick="copyToken()">Copiar Token</button>
-                </div>
-
-                <button class="logout-button" onclick="logout()">Cerrar Sesión</button>
             </div>
         </div>
 
@@ -473,6 +560,9 @@ async def start_page():
 
                 // Cargar modo actual
                 loadCurrentMode();
+
+                // Llenar combo de años
+                populateYears();
             }
 
             // Mostrar vista de login
@@ -616,6 +706,24 @@ async def start_page():
                 } catch (error) {
                     console.error('Error cambiando modo:', error);
                     alert('Error de conexión al cambiar el modo');
+                }
+            }
+
+            // Función para llenar el combo de años dinámicamente
+            function populateYears() {
+                const yearSelect = document.getElementById('yearSelect');
+                const currentYear = new Date().getFullYear();
+
+                // Limpiar opciones existentes
+                yearSelect.innerHTML = '';
+
+                // Agregar 10 años hacia atrás desde el año actual
+                for (let i = 0; i < 10; i++) {
+                    const year = currentYear - i;
+                    const option = document.createElement('option');
+                    option.value = year;
+                    option.textContent = year;
+                    yearSelect.appendChild(option);
                 }
             }
 
