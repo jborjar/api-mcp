@@ -218,15 +218,24 @@ El botón "Iniciar Base Auxiliar" en la tarjeta AJUSTES ejecuta el siguiente flu
    - Email del supervisor para notificaciones
 
 2. **Confirmación del usuario:**
-   - Muestra diálogo con todos los parámetros
+   - Muestra popup modal personalizado con todos los parámetros
    - Advierte que la base operativa actual será eliminada y recreada
+   - Botones "Cancelar" e "Iniciar"
 
 3. **Ejecución del proceso:**
+   - Deshabilita el botón para evitar múltiples ejecuciones
+   - Muestra mensaje de estatus en tiempo real bajo el botón
    - Establece el modo de operación vía `POST /pruebas/{modo}`
    - Inicia la inicialización vía `POST /inicializa_datos?anos={anos}&email={email}`
    - Retorna Job ID para monitorear el progreso
 
-4. **Uso de parámetros:**
+4. **Monitoreo en tiempo real:**
+   - Realiza polling automático cada 2 segundos al endpoint `/inicializa_datos/status/{job_id}`
+   - Actualiza el mensaje de estatus con el progreso actual
+   - Estados visuales: running (amarillo), completed (verde), failed (rojo)
+   - Habilita nuevamente el botón cuando el proceso termina
+
+5. **Uso de parámetros:**
    - **anos**: Utilizado en `analizar_actividad_proveedores` (0=solo año actual, 1=actual+1 anterior, etc.)
    - **email**: Si es diferente a EMAIL_SUPERVISOR del .env, se usa como destinatario de notificaciones
 

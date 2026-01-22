@@ -276,6 +276,143 @@ async def start_page():
             .setting-button:active {
                 transform: translateY(0);
             }
+            .setting-button:disabled {
+                background: #cccccc;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .setting-button:disabled:hover {
+                transform: none;
+                box-shadow: none;
+            }
+            .status-message {
+                margin-top: 15px;
+                padding: 12px;
+                border-radius: 6px;
+                font-size: 13px;
+                text-align: center;
+                display: none;
+            }
+            .status-message.running {
+                background-color: #fff3cd;
+                color: #856404;
+                border: 1px solid #ffeaa7;
+                display: block;
+            }
+            .status-message.completed {
+                background-color: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+                display: block;
+            }
+            .status-message.failed {
+                background-color: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+                display: block;
+            }
+            .modal-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.5);
+                z-index: 9999;
+                justify-content: center;
+                align-items: center;
+            }
+            .modal-overlay.show {
+                display: flex;
+            }
+            .modal-content {
+                background: white;
+                border-radius: 10px;
+                padding: 30px;
+                max-width: 500px;
+                width: 90%;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+                animation: modalSlideIn 0.3s ease-out;
+            }
+            @keyframes modalSlideIn {
+                from {
+                    transform: translateY(-50px);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateY(0);
+                    opacity: 1;
+                }
+            }
+            .modal-header {
+                font-size: 18px;
+                font-weight: 700;
+                color: #333;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            .modal-body {
+                font-size: 14px;
+                color: #555;
+                line-height: 1.6;
+                margin-bottom: 20px;
+            }
+            .modal-params {
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-radius: 6px;
+                margin: 15px 0;
+                border-left: 4px solid #667eea;
+            }
+            .modal-param-item {
+                margin: 8px 0;
+                font-size: 14px;
+            }
+            .modal-param-label {
+                font-weight: 600;
+                color: #333;
+            }
+            .modal-warning {
+                background-color: #fff3cd;
+                border: 1px solid #ffeaa7;
+                color: #856404;
+                padding: 12px;
+                border-radius: 6px;
+                margin-top: 15px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            .modal-buttons {
+                display: flex;
+                gap: 10px;
+                margin-top: 20px;
+            }
+            .modal-button {
+                flex: 1;
+                padding: 12px;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .modal-button-confirm {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+            .modal-button-confirm:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            }
+            .modal-button-cancel {
+                background: #e0e0e0;
+                color: #555;
+            }
+            .modal-button-cancel:hover {
+                background: #d0d0d0;
+            }
             .cards-container {
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
@@ -450,8 +587,40 @@ async def start_page():
                             <label class="setting-label">Enviar correo a</label>
                             <input type="email" class="setting-input" id="emailSupervisor" readonly>
                         </div>
-                        <button class="setting-button" onclick="iniciarBaseAuxiliar()">Iniciar Base Auxiliar</button>
+                        <button class="setting-button" id="btnIniciarBase" onclick="iniciarBaseAuxiliar()">Iniciar Base Auxiliar</button>
+                        <div class="status-message" id="statusMessage"></div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal de confirmación -->
+        <div class="modal-overlay" id="confirmModal">
+            <div class="modal-content">
+                <div class="modal-header">Confirmar Inicialización</div>
+                <div class="modal-body">
+                    <p>¿Está seguro de iniciar la base auxiliar con los siguientes parámetros?</p>
+                    <div class="modal-params">
+                        <div class="modal-param-item">
+                            <span class="modal-param-label">Modo:</span>
+                            <span id="modalModo"></span>
+                        </div>
+                        <div class="modal-param-item">
+                            <span class="modal-param-label">Años de actividad:</span>
+                            <span id="modalAnos"></span>
+                        </div>
+                        <div class="modal-param-item">
+                            <span class="modal-param-label">Correo:</span>
+                            <span id="modalCorreo"></span>
+                        </div>
+                    </div>
+                    <div class="modal-warning">
+                        ⚠️ ADVERTENCIA: Si existe una base operativa en este momento, será eliminada y se creará una nueva.
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <button class="modal-button modal-button-cancel" onclick="cerrarModalConfirmacion()">Cancelar</button>
+                    <button class="modal-button modal-button-confirm" onclick="confirmarInicializacion()">Iniciar</button>
                 </div>
             </div>
         </div>
@@ -737,8 +906,94 @@ async def start_page():
                 }
             }
 
-            // Función para iniciar base auxiliar
-            async function iniciarBaseAuxiliar() {
+            // Variable global para almacenar el interval de polling
+            let pollingInterval = null;
+
+            // Función para monitorear el progreso de un job
+            async function monitorearProgreso(jobId) {
+                const token = getCookie('session_token');
+                if (!token) return;
+
+                const statusMessage = document.getElementById('statusMessage');
+                const btnIniciar = document.getElementById('btnIniciarBase');
+
+                try {
+                    const response = await fetch(`/inicializa_datos/status/${jobId}`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+
+                        // Actualizar mensaje de estatus
+                        statusMessage.textContent = data.progress || 'Procesando...';
+
+                        // Si el job terminó (completed o failed)
+                        if (data.status === 'completed' || data.status === 'failed') {
+                            // Detener polling
+                            if (pollingInterval) {
+                                clearInterval(pollingInterval);
+                                pollingInterval = null;
+                            }
+
+                            // Actualizar clase del mensaje
+                            statusMessage.className = 'status-message ' + data.status;
+
+                            // Habilitar botón
+                            btnIniciar.disabled = false;
+
+                            // Mensaje final
+                            if (data.status === 'completed') {
+                                statusMessage.textContent = '✓ Inicialización completada exitosamente';
+                            } else {
+                                statusMessage.textContent = '✗ Error: ' + (data.error || 'Error desconocido');
+                            }
+                        } else {
+                            // Todavía está corriendo
+                            statusMessage.className = 'status-message running';
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error monitoreando progreso:', error);
+                }
+            }
+
+            // Funciones para el modal de confirmación
+            function abrirModalConfirmacion() {
+                const modo = document.getElementById('modeSelect').value;
+                const anos = document.getElementById('yearSelect').value;
+                const emailSupervisor = document.getElementById('emailSupervisor').value;
+
+                const modoTexto = modo === '1' ? 'Pruebas' : 'Productivo';
+
+                // Llenar datos del modal
+                document.getElementById('modalModo').textContent = modoTexto;
+                document.getElementById('modalAnos').textContent = anos;
+                document.getElementById('modalCorreo').textContent = emailSupervisor;
+
+                // Mostrar modal
+                document.getElementById('confirmModal').classList.add('show');
+            }
+
+            function cerrarModalConfirmacion() {
+                document.getElementById('confirmModal').classList.remove('show');
+            }
+
+            // Función para iniciar base auxiliar (muestra el modal)
+            function iniciarBaseAuxiliar() {
+                const token = getCookie('session_token');
+                if (!token) return;
+
+                abrirModalConfirmacion();
+            }
+
+            // Función que ejecuta la inicialización después de confirmar
+            async function confirmarInicializacion() {
+                cerrarModalConfirmacion();
+
                 const token = getCookie('session_token');
                 if (!token) return;
 
@@ -747,21 +1002,19 @@ async def start_page():
                 const anos = document.getElementById('yearSelect').value;
                 const emailSupervisor = document.getElementById('emailSupervisor').value;
 
-                const modoTexto = modo === '1' ? 'Pruebas' : 'Productivo';
-
-                // Confirmar acción
-                const confirmacion = confirm(
-                    `¿Está seguro de iniciar la base auxiliar con los siguientes parámetros?\n\n` +
-                    `Modo: ${modoTexto}\n` +
-                    `Años de actividad: ${anos}\n` +
-                    `Correo: ${emailSupervisor}\n\n` +
-                    `ADVERTENCIA: Si existe una base operativa en este momento, será eliminada y se creará una nueva.`
-                );
-
-                if (!confirmacion) return;
+                const statusMessage = document.getElementById('statusMessage');
+                const btnIniciar = document.getElementById('btnIniciarBase');
 
                 try {
+                    // Deshabilitar botón
+                    btnIniciar.disabled = true;
+
+                    // Mostrar mensaje inicial
+                    statusMessage.className = 'status-message running';
+                    statusMessage.textContent = 'Iniciando proceso...';
+
                     // Paso 1: Establecer modo de operación
+                    statusMessage.textContent = 'Estableciendo modo de operación...';
                     const modoResponse = await fetch(`/pruebas/${modo}`, {
                         method: 'POST',
                         headers: {
@@ -770,11 +1023,14 @@ async def start_page():
                     });
 
                     if (!modoResponse.ok) {
-                        alert('Error al establecer el modo de operación');
+                        statusMessage.className = 'status-message failed';
+                        statusMessage.textContent = '✗ Error al establecer el modo de operación';
+                        btnIniciar.disabled = false;
                         return;
                     }
 
                     // Paso 2: Ejecutar inicialización con parámetros
+                    statusMessage.textContent = 'Iniciando proceso de inicialización...';
                     const initResponse = await fetch(`/inicializa_datos?anos=${anos}&email=${encodeURIComponent(emailSupervisor)}`, {
                         method: 'POST',
                         headers: {
@@ -784,14 +1040,28 @@ async def start_page():
 
                     if (initResponse.ok) {
                         const data = await initResponse.json();
-                        alert(`Inicialización iniciada exitosamente\n\nJob ID: ${data.job_id}\n\nPuede consultar el progreso en el endpoint /inicializa_datos/status/${data.job_id}`);
+
+                        // Iniciar monitoreo del progreso
+                        statusMessage.textContent = 'Proceso iniciado. Monitoreando progreso...';
+
+                        // Hacer polling cada 2 segundos
+                        pollingInterval = setInterval(() => {
+                            monitorearProgreso(data.job_id);
+                        }, 2000);
+
+                        // Primera consulta inmediata
+                        monitorearProgreso(data.job_id);
                     } else {
                         const errorData = await initResponse.json();
-                        alert(`Error al iniciar la base auxiliar: ${errorData.detail || 'Error desconocido'}`);
+                        statusMessage.className = 'status-message failed';
+                        statusMessage.textContent = '✗ Error: ' + (errorData.detail || 'Error desconocido');
+                        btnIniciar.disabled = false;
                     }
                 } catch (error) {
                     console.error('Error iniciando base auxiliar:', error);
-                    alert('Error de conexión al iniciar la base auxiliar');
+                    statusMessage.className = 'status-message failed';
+                    statusMessage.textContent = '✗ Error de conexión al iniciar la base auxiliar';
+                    btnIniciar.disabled = false;
                 }
             }
 
