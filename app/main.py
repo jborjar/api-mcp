@@ -21,12 +21,9 @@ from database import (
     inicializa_sap_empresas,
     test_service_layer_all_instances,
     get_proveedores_sl,
-    poblar_sap_proveedores,
     enviar_correo_inicializacion,
     actualizar_sap_empresas,
     actualizar_sap_proveedores,
-    create_or_update_vista_maestro_proveedores,
-    get_maestro_proveedores,
     analizar_actividad_proveedores,
     get_mssql_connection,
 )
@@ -650,36 +647,6 @@ async def get_proveedores(
         "total": resultado["total"],
         "proveedores": resultado["proveedores"]
     }
-
-
-@app.get("/maestro_proveedores", tags=["MSSQL"])
-async def maestro_proveedores(
-    current_user: Annotated[TokenData, Depends(get_current_user)],
-    top: int | None = None,
-    card_name: str | None = None,
-    federal_tax_id: str | None = None
-) -> dict:
-    """
-    Consulta la vista maestro_proveedores.
-
-    Muestra proveedores con una columna por cada instancia SAP,
-    donde el valor es el CardCode en esa instancia (o NULL si no existe).
-
-    - **top**: Limita el número de registros retornados (opcional)
-    - **card_name**: Filtra por nombre que contenga el valor (opcional)
-    - **federal_tax_id**: Filtra por RFC que contenga el valor (opcional)
-    """
-    resultado = get_maestro_proveedores(
-        top=top,
-        card_name=card_name,
-        federal_tax_id=federal_tax_id
-    )
-    if not resultado["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=resultado.get("error", "Error al consultar maestro de proveedores")
-        )
-    return resultado
 
 
 @app.post("/proveedores/analizar-actividad", tags=["Proveedores"])

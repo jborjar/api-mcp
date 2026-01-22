@@ -114,7 +114,7 @@ docker compose up -d
 
 ## Endpoints Disponibles
 
-Total de endpoints: **26**
+Total de endpoints: **25**
 
 ### Autenticación (5 endpoints)
 
@@ -144,11 +144,10 @@ Total de endpoints: **26**
 - `POST /actualizar_empresas` - Actualiza SAP_EMPRESAS con datos de HANA (SAP es fuente de verdad, preserva SL)
 - `POST /actualizar_proveedores` - Actualiza SAP_PROVEEDORES con datos de Service Layer (requiere autenticación)
 
-### SAP Service Layer (3 endpoints)
+### SAP Service Layer (2 endpoints)
 
 - `GET /proveedores/{instancia}` - Obtener proveedores de una instancia SAP (requiere autenticación)
 - `GET /test_service_layer` - Prueba conexión a Service Layer para todas las instancias SAP (requiere autenticación)
-- `GET /maestro_proveedores` - Vista consolidada de proveedores con CardCode por instancia (requiere autenticación)
 
 ### Análisis (3 endpoints)
 
@@ -763,6 +762,7 @@ El proceso de inicialización realiza las siguientes operaciones:
 5. **Análisis de actividad de proveedores:**
    - Analiza la actividad de proveedores usando el parámetro `anos` especificado
    - Crea/actualiza las tablas SAP_PROV_ACTIVOS y SAP_PROV_INACTIVOS
+   - Crea la vista `dbo.vw_maestro_proveedores` (INNER JOIN entre SAP_PROV_ACTIVOS y SAP_PROVEEDORES)
    - Retorna un resumen de proveedores activos e inactivos
 
 6. **Notificación por correo:**
