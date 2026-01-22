@@ -50,6 +50,10 @@ JWT_SECRET_KEY=tu_clave_secreta_aqui
 JWT_ALGORITHM=HS256
 JWT_EXPIRATION_MINUTES=30
 
+# Configuración de sesiones y filtros
+SESIONES_ACTIVAS=2
+ANOS_ACTIVO=0
+
 # Microsoft SQL Server
 SA_PASSWORD=tu_password_sa
 MSSQL_HOST=mssql-api-mcp
@@ -88,6 +92,17 @@ TZ=America/Mexico_City
 LANG=es_MX.UTF-8
 LC_ALL=es_MX.UTF-8
 ```
+
+### Variables de Configuración
+
+- **SESIONES_ACTIVAS**: Número máximo de sesiones simultáneas por usuario (default: 2)
+  - Cuando se excede el límite, se elimina automáticamente la sesión más antigua
+  - Valor recomendado: 1-5 sesiones
+
+- **ANOS_ACTIVO**: Número de años hacia atrás para filtrar proveedores activos (default: 0)
+  - 0 = Año actual solamente
+  - 1 = Año actual y anterior
+  - n = Últimos n años
 
 ## Ejecución
 
@@ -198,7 +213,9 @@ La API utiliza **Session Tokens** almacenados en MSSQL con **renovación automá
 - **Timeout configurable**: 30 minutos de inactividad por defecto (configurable en `JWT_EXPIRATION_MINUTES`)
 - **Control total**: Invalidar sesiones individual o masivamente
 - **Sin dependencias externas**: Usa MSSQL existente (no requiere Redis)
-- **Múltiples sesiones**: Un usuario puede tener varias sesiones activas simultáneamente
+- **Límite de sesiones activas**: Configurable por usuario vía variable de entorno `SESIONES_ACTIVAS` (default: 2)
+  - Cuando un usuario excede el límite, se elimina automáticamente su sesión más antigua
+  - Permite controlar recursos y seguridad limitando sesiones simultáneas
 
 ### Tabla USER_SESSIONS
 

@@ -2,6 +2,7 @@
 Gestión de sesiones de usuario con tokens en base de datos.
 Permite renovación automática y control total sobre las sesiones activas.
 """
+import os
 import uuid
 from datetime import datetime, timedelta
 from database import get_mssql_connection
@@ -44,6 +45,7 @@ def ensure_sessions_table_exists() -> None:
 def create_session(username: str, scopes: list[str]) -> str:
     """
     Crea una nueva sesión para el usuario.
+    Si el usuario excede el límite de sesiones activas, elimina la más antigua.
     Retorna el SessionID (token).
     """
     ensure_sessions_table_exists()
@@ -52,10 +54,35 @@ def create_session(username: str, scopes: list[str]) -> str:
     now = datetime.now()
     scopes_str = ",".join(scopes)
 
+    # Obtener límite de sesiones activas desde variable de entorno
+    max_sessions = int(os.getenv("SESIONES_ACTIVAS", "2"))
+
     conn = get_mssql_connection()
     cursor = conn.cursor()
 
     try:
+        # Contar sesiones activas del usuario
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM USER_SESSIONS
+            WHERE Username = ?
+        """, (username,))
+        active_sessions = cursor.fetchone()[0]
+
+        # Si excede el límite, eliminar la sesión más antigua
+        if active_sessions >= max_sessions:
+            cursor.execute("""
+                DELETE FROM USER_SESSIONS
+                WHERE SessionID = (
+                    SELECT TOP 1 SessionID
+                    FROM USER_SESSIONS
+                    WHERE Username = ?
+                    ORDER BY LastActivity ASC
+                )
+            """, (username,))
+            conn.commit()
+
+        # Crear nueva sesión
         cursor.execute("""
             INSERT INTO USER_SESSIONS (SessionID, Username, CreatedAt, LastActivity, Scopes)
             VALUES (?, ?, ?, ?, ?)
