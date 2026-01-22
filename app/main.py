@@ -315,6 +315,32 @@ async def set_pruebas(
     }
 
 
+@app.get("/config/email", tags=["Sistema"])
+async def get_email_config(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """Retorna la configuración de email del sistema."""
+    settings = get_settings()
+    return {
+        "email_supervisor": settings.EMAIL_SUPERVISOR or "",
+        "smtp_host": settings.SMTP_HOST,
+        "smtp_port": settings.SMTP_PORT,
+        "email_from": settings.EMAIL_FROM
+    }
+
+
+@app.get("/config/sesiones", tags=["Sistema"])
+async def get_sesiones_config(
+    current_user: Annotated[TokenData, Depends(get_current_user)]
+) -> dict:
+    """Retorna la configuración de sesiones y años activos."""
+    import os
+    return {
+        "sesiones_activas": int(os.getenv("SESIONES_ACTIVAS", "2")),
+        "anos_activo": int(os.getenv("ANOS_ACTIVO", "0"))
+    }
+
+
 @app.get("/empresas_registradas", tags=["SAP HANA"])
 async def empresas_registradas(
     current_user: Annotated[TokenData, Depends(get_current_user)]
@@ -326,7 +352,7 @@ async def empresas_registradas(
     }
 
 
-def _run_inicializa_datos_background(job_id: str, session_id: str, username: str, scopes: list[str]):
+def _run_inicializa_datos_background(job_id: str, session_id: str, username: str, scopes: list[str], anos: int = 0, email: str | None = None):
     """Función que se ejecuta en background para inicializar datos."""
     from database import get_mssql_connection
 
@@ -351,10 +377,10 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
             initialization_jobs[job_id]["progress"] = "Poblando SAP_PROVEEDORES desde Service Layer..."
         resultado_proveedores = actualizar_sap_proveedores()
 
-        # Analizar actividad de proveedores
+        # Analizar actividad de proveedores usando el parámetro anos
         with jobs_lock:
-            initialization_jobs[job_id]["progress"] = "Analizando actividad de proveedores y creando tablas SAP_PROV_ACTIVOS/INACTIVOS..."
-        resultado_actividad = analizar_actividad_proveedores()
+            initialization_jobs[job_id]["progress"] = f"Analizando actividad de proveedores (años={anos}) y creando tablas SAP_PROV_ACTIVOS/INACTIVOS..."
+        resultado_actividad = analizar_actividad_proveedores(anos=anos)
 
         # Restaurar la sesión del usuario actual
         with jobs_lock:
@@ -374,16 +400,20 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
             conn.close()
 
         # Enviar correo con todos los resultados
+        # Si se proporcionó un email diferente al configurado, usar ese
         with jobs_lock:
             initialization_jobs[job_id]["progress"] = "Enviando correo con resultados..."
         from config import get_settings
         settings = get_settings()
-        if settings.EMAIL_SUPERVISOR:
+        # Usar email del formulario solo si es diferente a EMAIL_SUPERVISOR
+        destinatario = email if (email and email != settings.EMAIL_SUPERVISOR) else settings.EMAIL_SUPERVISOR
+        if destinatario:
             email_result = enviar_correo_inicializacion(
                 resultado_empresas,
                 resultado_sl,
                 resultado_proveedores,
-                resultado_actividad
+                resultado_actividad,
+                destinatario=destinatario
             )
         else:
             email_result = {"success": False, "error": "No hay destinatario configurado"}
@@ -413,7 +443,9 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
 @app.post("/inicializa_datos", tags=["MSSQL"])
 async def inicializa_datos(
     background_tasks: BackgroundTasks,
-    current_user: Annotated[TokenData, Depends(get_current_user)]
+    current_user: Annotated[TokenData, Depends(get_current_user)],
+    anos: int = 0,
+    email: str | None = None
 ) -> dict:
     """
     Inicializa la base de datos completa de forma asíncrona.
@@ -460,7 +492,9 @@ async def inicializa_datos(
         job_id,
         session_id,
         username,
-        scopes
+        scopes,
+        anos,
+        email
     )
 
     return {

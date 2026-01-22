@@ -897,14 +897,19 @@ def enviar_correo_inicializacion(
     sap_empresas_result: dict | None,
     service_layer_result: dict | None,
     sap_proveedores_result: dict | None,
-    analisis_actividad_result: dict | None = None
+    analisis_actividad_result: dict | None = None,
+    destinatario: str | None = None
 ) -> dict:
     """
     Envía correo con los resultados de la inicialización de datos.
+    Si no se proporciona destinatario, usa EMAIL_SUPERVISOR del .env
     """
     settings = get_settings()
 
-    if not settings.EMAIL_SUPERVISOR:
+    # Usar el destinatario proporcionado o el configurado en .env
+    email_destino = destinatario if destinatario else settings.EMAIL_SUPERVISOR
+
+    if not email_destino:
         return {"success": False, "error": "No hay destinatario configurado"}
 
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -986,7 +991,7 @@ def enviar_correo_inicializacion(
         "content": json.dumps(full_result, indent=2, ensure_ascii=False)
     }
 
-    return send_email(settings.EMAIL_SUPERVISOR, subject, body, attachment)
+    return send_email(email_destino, subject, body, attachment)
 
 
 def get_instancias_con_service_layer() -> list[str]:

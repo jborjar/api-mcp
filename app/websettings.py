@@ -441,12 +441,16 @@ async def start_page():
                             </select>
                         </div>
                         <div class="setting-item">
-                            <label class="setting-label">Proveedores activos desde</label>
+                            <label class="setting-label">Proveedores activos</label>
                             <select class="setting-input" id="yearSelect">
                                 <!-- Se llenará dinámicamente con JavaScript -->
                             </select>
                         </div>
-                        <button class="setting-button" onclick="changeMode()">Iniciar Base Auxiliar</button>
+                        <div class="setting-item">
+                            <label class="setting-label">Enviar correo a</label>
+                            <input type="email" class="setting-input" id="emailSupervisor" readonly>
+                        </div>
+                        <button class="setting-button" onclick="iniciarBaseAuxiliar()">Iniciar Base Auxiliar</button>
                     </div>
                 </div>
             </div>
@@ -563,6 +567,12 @@ async def start_page():
 
                 // Llenar combo de años
                 populateYears();
+
+                // Cargar configuración de email
+                loadEmailConfig();
+
+                // Cargar configuración de sesiones y años
+                loadSesionesConfig();
             }
 
             // Mostrar vista de login
@@ -682,16 +692,14 @@ async def start_page():
                 }
             }
 
-            // Función para cambiar el modo
-            async function changeMode() {
+            // Función para cargar configuración de email
+            async function loadEmailConfig() {
                 const token = getCookie('session_token');
                 if (!token) return;
 
-                const newMode = document.getElementById('modeSelect').value;
-
                 try {
-                    const response = await fetch(`/pruebas/${newMode}`, {
-                        method: 'POST',
+                    const response = await fetch('/config/email', {
+                        method: 'GET',
                         headers: {
                             'Authorization': `Bearer ${token}`
                         }
@@ -699,13 +707,91 @@ async def start_page():
 
                     if (response.ok) {
                         const data = await response.json();
-                        alert(`Modo cambiado a: ${data.modo_pruebas ? 'Pruebas' : 'Productivo'}`);
-                    } else {
-                        alert('Error al cambiar el modo');
+                        document.getElementById('emailSupervisor').value = data.email_supervisor;
                     }
                 } catch (error) {
-                    console.error('Error cambiando modo:', error);
-                    alert('Error de conexión al cambiar el modo');
+                    console.error('Error cargando configuración de email:', error);
+                }
+            }
+
+            // Función para cargar configuración de sesiones y años
+            async function loadSesionesConfig() {
+                const token = getCookie('session_token');
+                if (!token) return;
+
+                try {
+                    const response = await fetch('/config/sesiones', {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        document.getElementById('sessionLimitSelect').value = data.sesiones_activas;
+                        document.getElementById('yearSelect').value = data.anos_activo;
+                    }
+                } catch (error) {
+                    console.error('Error cargando configuración de sesiones:', error);
+                }
+            }
+
+            // Función para iniciar base auxiliar
+            async function iniciarBaseAuxiliar() {
+                const token = getCookie('session_token');
+                if (!token) return;
+
+                // Obtener valores de configuración
+                const modo = document.getElementById('modeSelect').value;
+                const anos = document.getElementById('yearSelect').value;
+                const emailSupervisor = document.getElementById('emailSupervisor').value;
+
+                const modoTexto = modo === '1' ? 'Pruebas' : 'Productivo';
+
+                // Confirmar acción
+                const confirmacion = confirm(
+                    `¿Está seguro de iniciar la base auxiliar con los siguientes parámetros?\n\n` +
+                    `Modo: ${modoTexto}\n` +
+                    `Años de actividad: ${anos}\n` +
+                    `Correo: ${emailSupervisor}\n\n` +
+                    `ADVERTENCIA: Si existe una base operativa en este momento, será eliminada y se creará una nueva.`
+                );
+
+                if (!confirmacion) return;
+
+                try {
+                    // Paso 1: Establecer modo de operación
+                    const modoResponse = await fetch(`/pruebas/${modo}`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (!modoResponse.ok) {
+                        alert('Error al establecer el modo de operación');
+                        return;
+                    }
+
+                    // Paso 2: Ejecutar inicialización con parámetros
+                    const initResponse = await fetch(`/inicializa_datos?anos=${anos}&email=${encodeURIComponent(emailSupervisor)}`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (initResponse.ok) {
+                        const data = await initResponse.json();
+                        alert(`Inicialización iniciada exitosamente\n\nJob ID: ${data.job_id}\n\nPuede consultar el progreso en el endpoint /inicializa_datos/status/${data.job_id}`);
+                    } else {
+                        const errorData = await initResponse.json();
+                        alert(`Error al iniciar la base auxiliar: ${errorData.detail || 'Error desconocido'}`);
+                    }
+                } catch (error) {
+                    console.error('Error iniciando base auxiliar:', error);
+                    alert('Error de conexión al iniciar la base auxiliar');
                 }
             }
 
@@ -717,12 +803,16 @@ async def start_page():
                 // Limpiar opciones existentes
                 yearSelect.innerHTML = '';
 
-                // Agregar 10 años hacia atrás desde el año actual
+                // Agregar opciones de 0 a 9 años hacia atrás
                 for (let i = 0; i < 10; i++) {
-                    const year = currentYear - i;
                     const option = document.createElement('option');
-                    option.value = year;
-                    option.textContent = year;
+                    option.value = i;
+                    if (i === 0) {
+                        option.textContent = `Solo ${currentYear}`;
+                    } else {
+                        const startYear = currentYear - i;
+                        option.textContent = `${startYear} - ${currentYear} (${i + 1} años)`;
+                    }
                     yearSelect.appendChild(option);
                 }
             }

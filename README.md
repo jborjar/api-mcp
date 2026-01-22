@@ -114,7 +114,7 @@ docker compose up -d
 
 ## Endpoints Disponibles
 
-Total de endpoints: **24**
+Total de endpoints: **26**
 
 ### Autenticación (5 endpoints)
 
@@ -124,13 +124,15 @@ Total de endpoints: **24**
 - `POST /auth/logout-all` - Cerrar todas las sesiones del usuario
 - `POST /auth/cleanup` - Limpiar sesiones expiradas (mantenimiento)
 
-### Sistema (5 endpoints)
+### Sistema (7 endpoints)
 
 - `GET /health` - Verificar estado del servicio
 - `GET /me` - Información del usuario autenticado y sesión actual
 - `GET /pruebas` - Consultar modo actual (productivo/pruebas)
 - `POST /pruebas/{valor}` - Establecer modo (0=productivo, 1=pruebas)
 - `GET /start` - Interfaz web con login y panel de ajustes
+- `GET /config/email` - Consultar configuración de email del sistema
+- `GET /config/sesiones` - Consultar configuración de sesiones y años activos
 
 ### SAP HANA (1 endpoint)
 
@@ -187,8 +189,9 @@ El sistema incluye una interfaz web accesible en `http://localhost:8000/start` q
   3. **Tarjeta AJUSTES**:
      - Selector de modo de operación (Productivo/Pruebas)
      - Configuración de sesiones activas por usuario (1, 2, 5)
-     - Selector de año para proveedores activos (últimos 10 años)
-     - Botón para iniciar base auxiliar
+     - Selector de proveedores activos (0-9 años hacia atrás, con texto descriptivo)
+     - Campo de email del supervisor (readonly, cargado desde .env)
+     - Botón "Iniciar Base Auxiliar" con flujo completo de confirmación
 
 - **Validación automática**: Verifica el token contra el servidor al cargar la página
 - **Diseño responsive**: Layout de 3 columnas en escritorio, adaptado para dispositivos móviles
@@ -204,6 +207,66 @@ http://localhost:8000/start
 La interfaz valida automáticamente si existe una sesión activa (cookie) y muestra:
 - **Login form** si no hay sesión válida
 - **Panel autenticado con 3 tarjetas** si la sesión es válida
+
+### Funcionalidad "Iniciar Base Auxiliar"
+
+El botón "Iniciar Base Auxiliar" en la tarjeta AJUSTES ejecuta el siguiente flujo:
+
+1. **Lectura de configuración:**
+   - Modo de operación (Productivo/Pruebas)
+   - Años de actividad para análisis de proveedores (0-9)
+   - Email del supervisor para notificaciones
+
+2. **Confirmación del usuario:**
+   - Muestra diálogo con todos los parámetros
+   - Advierte que la base operativa actual será eliminada y recreada
+
+3. **Ejecución del proceso:**
+   - Establece el modo de operación vía `POST /pruebas/{modo}`
+   - Inicia la inicialización vía `POST /inicializa_datos?anos={anos}&email={email}`
+   - Retorna Job ID para monitorear el progreso
+
+4. **Uso de parámetros:**
+   - **anos**: Utilizado en `analizar_actividad_proveedores` (0=solo año actual, 1=actual+1 anterior, etc.)
+   - **email**: Si es diferente a EMAIL_SUPERVISOR del .env, se usa como destinatario de notificaciones
+
+## Endpoints de Configuración
+
+### GET /config/email
+
+Obtiene la configuración de email del sistema desde las variables de entorno.
+
+```bash
+curl http://localhost:8000/config/email \
+  -H "Authorization: Bearer <token>"
+```
+
+Respuesta:
+```json
+{
+  "email_supervisor": "supervisor@empresa.com",
+  "smtp_host": "postfix-api-mcp",
+  "smtp_port": 25,
+  "email_from": "aviso@progex.grupoexpansion"
+}
+```
+
+### GET /config/sesiones
+
+Obtiene la configuración de sesiones y años activos desde las variables de entorno.
+
+```bash
+curl http://localhost:8000/config/sesiones \
+  -H "Authorization: Bearer <token>"
+```
+
+Respuesta:
+```json
+{
+  "sesiones_activas": 2,
+  "anos_activo": 0
+}
+```
 
 ## Sistema de Autenticación
 
@@ -571,8 +634,17 @@ El sistema de inicialización de datos utiliza un modelo asíncrono con tracking
 
 Inicia un proceso asíncrono de inicialización y retorna inmediatamente un Job ID para monitorear el progreso.
 
+**Parámetros opcionales:**
+- `anos` (int, default: 0): Años de actividad a analizar (0=solo año actual, 1=actual+1 anterior, etc.)
+- `email` (str, opcional): Email destinatario de notificaciones. Si no se proporciona o es igual a EMAIL_SUPERVISOR, usa el configurado en .env
+
 ```bash
+# Inicialización básica
 curl -X POST http://localhost:8000/inicializa_datos \
+  -H "Authorization: Bearer <token>"
+
+# Con parámetros personalizados
+curl -X POST "http://localhost:8000/inicializa_datos?anos=2&email=supervisor@empresa.com" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -679,7 +751,13 @@ El proceso de inicialización realiza las siguientes operaciones:
    - SAP Service Layer es la fuente de verdad
    - Retorna un resumen de proveedores actualizados/insertados/eliminados por instancia
 
-5. **Notificación por correo:**
+5. **Análisis de actividad de proveedores:**
+   - Analiza la actividad de proveedores usando el parámetro `anos` especificado
+   - Crea/actualiza las tablas SAP_PROV_ACTIVOS y SAP_PROV_INACTIVOS
+   - Retorna un resumen de proveedores activos e inactivos
+
+6. **Notificación por correo:**
+   - **Destinatario:** Usa el parámetro `email` si se proporciona y es diferente a EMAIL_SUPERVISOR, caso contrario usa EMAIL_SUPERVISOR del .env
    - **Remitente:** aviso@progex.grupoexpansion
    - **Asunto:** Inicializacion de datos - YYYY-MM-DD HH:MM:SS
    - **Cuerpo:**
