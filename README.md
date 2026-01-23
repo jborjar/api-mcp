@@ -152,7 +152,7 @@ Total de endpoints: **25**
 ### Análisis (3 endpoints)
 
 - `POST /proveedores/analizar-actividad` - Analiza actividad de proveedores en los últimos N años (requiere autenticación)
-- `GET /inicializa_datos/status/{job_id}` - Consulta el estado de un job de inicialización (requiere autenticación)
+- `GET /inicializa_datos/status/{job_id}` - Consulta el estado de un job de inicialización (público, sin autenticación)
 - `GET /inicializa_datos/jobs` - Lista todos los jobs de inicialización (requiere autenticación)
 
 ### MCP (4 endpoints - requieren autenticación con scopes específicos)
@@ -186,11 +186,16 @@ El sistema incluye una interfaz web accesible en `http://localhost:8000/start` q
      - Scopes asignados al usuario
 
   3. **Tarjeta AJUSTES**:
-     - Selector de modo de operación (Productivo/Pruebas)
-     - Configuración de sesiones activas por usuario (1, 2, 5)
-     - Selector de proveedores activos (0-9 años hacia atrás, con texto descriptivo)
-     - Campo de email del supervisor (readonly, cargado desde .env)
-     - Botón "Iniciar Base Auxiliar" con flujo completo de confirmación
+     - **Fila 1**: Modo de Operación + Sesiones activas (1, 2, 5)
+     - **Fila 2**: Proveedores activos (0-9 años hacia atrás) + Enviar correo a (readonly)
+     - **Botones fila 1**: Iniciar Base Auxiliar (degradado rojo-naranja) + Cambiar Ajustes (degradado amarillo-verde)
+     - **Botones fila 2**: Actualizar Proveedores (degradado amarillo-verde) + Respaldar Usuarios (degradado amarillo-verde)
+     - **Área de status**: Mensaje de progreso con spinner animado durante ejecución
+       - Spinner: Círculo giratorio (20px) alineado a la derecha
+       - Colores: Amarillo durante ejecución, verde al completar, rojo en error
+       - Formato de mensaje en dos líneas: título + estado actual
+     - Los 4 botones se deshabilitan simultáneamente durante la ejecución de "Iniciar Base Auxiliar"
+     - Botón "Iniciar Base Auxiliar" con flujo completo de confirmación y monitoreo en tiempo real
 
 - **Validación automática**: Verifica el token contra el servidor al cargar la página
 - **Diseño responsive**: Layout de 3 columnas en escritorio, adaptado para dispositivos móviles
@@ -222,21 +227,50 @@ El botón "Iniciar Base Auxiliar" en la tarjeta AJUSTES ejecuta el siguiente flu
    - Botones "Cancelar" e "Iniciar"
 
 3. **Ejecución del proceso:**
-   - Deshabilita el botón para evitar múltiples ejecuciones
-   - Muestra mensaje de estatus en tiempo real bajo el botón
+   - Deshabilita los 4 botones de la tarjeta AJUSTES para evitar múltiples ejecuciones
+   - Muestra mensaje de estatus en tiempo real bajo los botones
    - Establece el modo de operación vía `POST /pruebas/{modo}`
    - Inicia la inicialización vía `POST /inicializa_datos?anos={anos}&email={email}`
    - Retorna Job ID para monitorear el progreso
 
 4. **Monitoreo en tiempo real:**
    - Realiza polling automático cada 2 segundos al endpoint `/inicializa_datos/status/{job_id}`
-   - Actualiza el mensaje de estatus con el progreso actual
-   - Estados visuales: running (amarillo), completed (verde), failed (rojo)
-   - Habilita nuevamente el botón cuando el proceso termina
+   - Actualiza el mensaje de estatus con el progreso actual en formato de dos líneas:
+     ```
+     Ejecutando proceso de inicialización
+     [Estado actual del job]
+     ```
+   - Muestra spinner animado (círculo giratorio) alineado a la derecha durante la ejecución
+   - Estados visuales: running (amarillo con spinner), completed (verde), failed (rojo)
+   - Manejo robusto de reinicios del servidor:
+     - Si el servidor reinicia durante la ejecución, detecta el error 404
+     - Detiene el polling automáticamente
+     - Muestra mensaje de completado con historial de jobs disponible
+     - Re-habilita los 4 botones para permitir nuevas operaciones
+   - Habilita los 4 botones cuando el proceso termina (exitosamente o con error)
+   - Muestra historial de las últimas 3 inicializaciones con fechas y estados
 
 5. **Uso de parámetros:**
    - **anos**: Utilizado en `analizar_actividad_proveedores` (0=solo año actual, 1=actual+1 anterior, etc.)
    - **email**: Si es diferente a EMAIL_SUPERVISOR del .env, se usa como destinatario de notificaciones
+
+### Otros Botones de la Tarjeta AJUSTES
+
+La tarjeta AJUSTES incluye tres botones adicionales para operaciones específicas:
+
+1. **Cambiar Ajustes** (degradado amarillo-verde):
+   - Pendiente de implementación
+   - Permitirá modificar configuraciones de sesiones activas, proveedores activos y email del supervisor
+
+2. **Actualizar Proveedores** (degradado amarillo-verde):
+   - Pendiente de implementación
+   - Sincronizará la tabla SAP_PROVEEDORES con Service Layer sin recrear la base de datos
+
+3. **Respaldar Usuarios** (degradado amarillo-verde):
+   - Pendiente de implementación
+   - Creará un respaldo de la tabla USER_SESSIONS
+
+**Nota:** Los 4 botones se deshabilitan simultáneamente cuando "Iniciar Base Auxiliar" está en ejecución.
 
 ## Endpoints de Configuración
 
@@ -668,10 +702,20 @@ Respuesta:
 
 Consulta el estado actual de un job de inicialización específico.
 
+**NOTA IMPORTANTE:** Este endpoint **NO requiere autenticación** para permitir el monitoreo durante el proceso de inicialización, cuando la sesión del usuario puede estar siendo recreada en la base de datos.
+
 ```bash
+# Sin autenticación (recomendado durante inicialización)
+curl http://localhost:8000/inicializa_datos/status/174f89bd-9f47-48c0-ac2f-2fc75f926ec8
+
+# Con autenticación (también funciona)
 curl http://localhost:8000/inicializa_datos/status/174f89bd-9f47-48c0-ac2f-2fc75f926ec8 \
   -H "Authorization: Bearer <token>"
 ```
+
+**Manejo de errores:**
+- Si el job no existe o el servidor reinició, retorna `404 Not Found`
+- La interfaz web maneja automáticamente este caso mostrando el mensaje de completado con historial
 
 Respuesta (en progreso):
 ```json
@@ -726,6 +770,25 @@ Respuesta:
   ]
 }
 ```
+
+### Manejo de Reinicios del Servidor
+
+El sistema de tracking de jobs utiliza un diccionario en memoria que se resetea cuando el servidor se reinicia (por ejemplo, cuando uvicorn detecta cambios en el código con `--reload`). Para manejar esta situación:
+
+**Comportamiento del sistema:**
+1. Los jobs en ejecución continúan procesándose en segundo plano incluso si el servidor reinicia
+2. El tracking del job (estado, progreso) se pierde al reiniciar porque está en memoria
+3. La interfaz web detecta automáticamente cuando un job ya no existe (404) durante el polling
+4. Al detectar un 404, la interfaz:
+   - Detiene el polling automáticamente
+   - Re-habilita los botones de la tarjeta AJUSTES
+   - Muestra mensaje de completado con el historial disponible de jobs
+   - Permite al usuario verificar manualmente si la inicialización se completó
+
+**Recomendación:**
+- Si un job queda "atorado" en estado running después de un reinicio del servidor, refresca la página en el navegador
+- Verifica el estado de la base de datos para confirmar si la inicialización se completó exitosamente
+- Consulta los logs del contenedor para ver el resultado completo: `docker compose logs api-mcp --tail=200`
 
 ## Endpoint inicializa_datos - Detalle del proceso
 
@@ -1443,3 +1506,63 @@ El endpoint `/inicializa_datos` fue modificado para preservar la sesión del usu
 - 21 de 24 instancias con Service Layer funcional
 
 Para más detalles, consultar el reporte completo en `tests/prueba_inicializa_datos_session_preservation.md`.
+
+## Configuración de Git
+
+### Hook prepare-commit-msg
+
+El repositorio incluye un hook de Git configurado en `.git/hooks/prepare-commit-msg` que automáticamente remueve líneas de co-autoría relacionadas con herramientas de IA de los mensajes de commit.
+
+**Función del hook:**
+- Elimina líneas `Co-Authored-By` que contengan "claude" o dominios "anthropic.com"
+- Limpia líneas en blanco residuales en los mensajes de commit
+- Se ejecuta automáticamente antes de cada commit
+
+**Ubicación:** `.git/hooks/prepare-commit-msg`
+
+**Nota:** Este hook ya está configurado y activo en el repositorio local. No requiere configuración adicional.
+
+## Configuración de Timezone y Locales
+
+El sistema está configurado para usar **America/Mexico_City** como timezone y **es_MX.UTF-8** como locale en todos los contenedores.
+
+### Configuración en docker-compose.yml
+
+Todos los servicios (api-mcp, mssql-api-mcp, postfix-api-mcp) tienen las siguientes variables de entorno:
+
+```yaml
+environment:
+  - TZ=${TZ:-America/Mexico_City}
+  - LANG=${LANG:-es_MX.UTF-8}
+  - LC_ALL=${LC_ALL:-es_MX.UTF-8}
+```
+
+### Configuración en Dockerfiles
+
+Todos los Dockerfiles instalan y configuran los locales necesarios:
+
+1. **Dockerfile.api-mcp**: Instala `locales` y `tzdata`, genera `es_MX.UTF-8`
+2. **Dockerfile.mssql2022**: Instala `locales`, genera `es_MX.UTF-8` y actualiza locale
+3. **Dockerfile.postfix**: Instala `locales` y `tzdata`, genera `es_MX.UTF-8`
+
+### Timezone-aware datetimes en Python
+
+El código Python usa `utils.now()` en lugar de `datetime.now()` para asegurar que todas las fechas sean timezone-aware:
+
+```python
+from utils import now as tz_now
+
+# Crear fecha con timezone awareness
+fecha_actual = tz_now()  # datetime con ZoneInfo('America/Mexico_City')
+```
+
+**Archivos actualizados:**
+- `app/utils.py`: Función helper `now()` que retorna datetime con timezone
+- `app/main.py`: Usa `tz_now()` para registros de jobs
+- `app/session.py`: Usa `tz_now()` para gestión de sesiones
+- `app/database.py`: Usa `tz_now()` para timestamps de emails y reportes
+
+Esta configuración asegura que:
+- Todas las fechas se almacenan y muestran en timezone México (GMT-6)
+- Los formatos de fecha/hora respetan el locale español mexicano
+- No aparecen fechas inválidas (31/12/1969) por timezone-naive datetimes

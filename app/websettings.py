@@ -237,6 +237,12 @@ async def start_page():
             .setting-item:last-child {
                 margin-bottom: 0;
             }
+            .setting-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+                margin-bottom: 15px;
+            }
             .setting-label {
                 display: block;
                 font-weight: 600;
@@ -285,13 +291,44 @@ async def start_page():
                 transform: none;
                 box-shadow: none;
             }
+            .setting-button-danger {
+                background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+            }
+            .setting-button-danger:hover {
+                box-shadow: 0 5px 15px rgba(220, 53, 69, 0.4);
+            }
+            .setting-button-warning {
+                background: linear-gradient(135deg, #ffc107 0%, #28a745 100%);
+            }
+            .setting-button-warning:hover {
+                box-shadow: 0 5px 15px rgba(255, 193, 7, 0.4);
+            }
             .status-message {
                 margin-top: 15px;
                 padding: 12px;
                 border-radius: 6px;
                 font-size: 13px;
-                text-align: center;
+                text-align: left;
                 display: none;
+                white-space: pre-line;
+            }
+            .status-message.running {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .spinner {
+                display: inline-block;
+                width: 20px;
+                height: 20px;
+                border: 3px solid rgba(133, 100, 4, 0.2);
+                border-radius: 50%;
+                border-top-color: #856404;
+                animation: spin 0.8s linear infinite;
+                flex-shrink: 0;
+            }
+            @keyframes spin {
+                to { transform: rotate(360deg); }
             }
             .status-message.running {
                 background-color: #fff3cd;
@@ -420,6 +457,11 @@ async def start_page():
                 margin-bottom: 20px;
                 width: 100%;
             }
+            .column-stack {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }
             .api-card {
                 background: white;
                 border-radius: 10px;
@@ -500,7 +542,7 @@ async def start_page():
                     <h1>API MCP</h1>
                     <p class="subtitle">Sistema de Gestión de Proveedores SAP</p>
 
-                    <form id="loginForm">
+                    <form id="loginForm" onsubmit="return false;">
                         <div class="form-group">
                             <label for="username">Usuario</label>
                             <input type="text" id="username" name="username" required autocomplete="username">
@@ -520,75 +562,102 @@ async def start_page():
 
             <!-- Vista autenticada -->
             <div id="authenticatedView" class="authenticated-view">
-                <!-- Contenedor de las 3 tarjetas en grid -->
+                <!-- Contenedor de las 3 columnas en grid -->
                 <div class="cards-container">
-                    <!-- Tarjeta API MCP -->
-                    <div class="api-card">
-                        <h3>API MCP</h3>
-                        <div class="session-status">Sesión activa</div>
-                        <div class="token-info">
-                            <div class="token-label">Token de Sesión:</div>
-                            <div class="token-value" id="tokenValue"></div>
-                            <button class="copy-button" onclick="copyToken()">Copiar Token</button>
+                    <!-- Columna 1: API MCP + INFORMACIÓN DEL USUARIO -->
+                    <div class="column-stack">
+                        <!-- Tarjeta API MCP -->
+                        <div class="api-card">
+                            <h3>API MCP</h3>
+                            <div class="session-status">Sesión activa</div>
+                            <div class="token-info">
+                                <div class="token-label">Token de Sesión:</div>
+                                <div class="token-value" id="tokenValue"></div>
+                                <button class="copy-button" onclick="copyToken()">Copiar Token</button>
+                            </div>
+                            <button class="logout-button" onclick="logout()">Cerrar Sesión</button>
                         </div>
-                        <button class="logout-button" onclick="logout()">Cerrar Sesión</button>
+
+                        <!-- Tarjeta de información del usuario -->
+                        <div class="user-info-card" id="userInfoCard">
+                            <h3>INFORMACIÓN DEL USUARIO</h3>
+                            <div class="info-row">
+                                <span class="info-label">Usuario:</span>
+                                <span class="info-value" id="infoUsername">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Creada:</span>
+                                <span class="info-value" id="infoCreatedAt">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Expira:</span>
+                                <span class="info-value" id="infoExpiresAt">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Scopes:</span>
+                                <span class="info-value" id="infoScopes">-</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Tarjeta de información del usuario -->
-                    <div class="user-info-card" id="userInfoCard">
-                        <h3>INFORMACIÓN DEL USUARIO</h3>
-                        <div class="info-row">
-                            <span class="info-label">Usuario:</span>
-                            <span class="info-value" id="infoUsername">-</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">Session ID:</span>
-                            <span class="info-value" id="infoSessionId">-</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">Creada:</span>
-                            <span class="info-value" id="infoCreatedAt">-</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">Expira:</span>
-                            <span class="info-value" id="infoExpiresAt">-</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">Scopes:</span>
-                            <span class="info-value" id="infoScopes">-</span>
-                        </div>
-                    </div>
-
-                    <!-- Tarjeta de ajustes -->
+                    <!-- Columna 2: Tarjeta de ajustes -->
                     <div class="settings-card" id="settingsCard">
                         <h3>AJUSTES</h3>
-                        <div class="setting-item">
-                            <label class="setting-label">Modo de Operación</label>
-                            <select class="setting-input" id="modeSelect">
-                                <option value="0">Productivo</option>
-                                <option value="1">Pruebas</option>
-                            </select>
+                        <!-- Fila 1: Modo de Operación y Sesiones activas -->
+                        <div class="setting-row">
+                            <div class="setting-item">
+                                <label class="setting-label">Modo de Operación</label>
+                                <select class="setting-input" id="modeSelect">
+                                    <option value="0">Productivo</option>
+                                    <option value="1">Pruebas</option>
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <label class="setting-label">Sesiones activas</label>
+                                <select class="setting-input" id="sessionLimitSelect">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="5">5</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="setting-item">
-                            <label class="setting-label">Sesiones activas por usuario</label>
-                            <select class="setting-input" id="sessionLimitSelect">
-                                <option value="1">1</option>
-                                <option value="2">2</option>
-                                <option value="5">5</option>
-                            </select>
+                        <!-- Fila 2: Proveedores activos y Enviar correo a -->
+                        <div class="setting-row">
+                            <div class="setting-item">
+                                <label class="setting-label">Proveedores activos</label>
+                                <select class="setting-input" id="yearSelect">
+                                    <!-- Se llenará dinámicamente con JavaScript -->
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <label class="setting-label">Enviar correo a</label>
+                                <input type="email" class="setting-input" id="emailSupervisor" readonly>
+                            </div>
                         </div>
-                        <div class="setting-item">
-                            <label class="setting-label">Proveedores activos</label>
-                            <select class="setting-input" id="yearSelect">
-                                <!-- Se llenará dinámicamente con JavaScript -->
-                            </select>
+                        <!-- Fila de botones 1 -->
+                        <div class="setting-row">
+                            <button class="setting-button setting-button-danger" id="btnIniciarBase" onclick="iniciarBaseAuxiliar()">Iniciar Base Auxiliar</button>
+                            <button class="setting-button setting-button-warning" id="btnCambiarAjustes">Cambiar Ajustes</button>
                         </div>
-                        <div class="setting-item">
-                            <label class="setting-label">Enviar correo a</label>
-                            <input type="email" class="setting-input" id="emailSupervisor" readonly>
+                        <!-- Fila de botones 2 -->
+                        <div class="setting-row">
+                            <button class="setting-button setting-button-warning" id="btnActualizarProveedores">Actualizar Proveedores</button>
+                            <button class="setting-button setting-button-warning" id="btnRespaldarUsuarios">Respaldar Usuarios</button>
                         </div>
-                        <button class="setting-button" id="btnIniciarBase" onclick="iniciarBaseAuxiliar()">Iniciar Base Auxiliar</button>
                         <div class="status-message" id="statusMessage"></div>
+                    </div>
+
+                    <!-- Columna 3: Tarjeta de Auditoría -->
+                    <div class="settings-card" id="auditoriaCard">
+                        <h3>AUDITORÍA INFORMACIÓN DE PROVEEDORES</h3>
+                        <div class="setting-item">
+                            <label class="setting-label">Seleccionar proveedor</label>
+                            <select class="setting-input" id="proveedorSelect">
+                                <option value="">-- Seleccione un proveedor --</option>
+                            </select>
+                        </div>
+                        <button class="setting-button" id="btnAuditoriaProveedor">Consultar Información</button>
+                        <div class="status-message" id="auditoriaStatusMessage"></div>
                     </div>
                 </div>
             </div>
@@ -670,7 +739,19 @@ async def start_page():
 
                         if (response.ok) {
                             const userData = await response.json();
-                            // Token válido, mostrar vista autenticada
+
+                            // Verificar si tiene el scope sql:adm
+                            if (!userData.scopes || !userData.scopes.includes('sql:adm')) {
+                                // No tiene el scope requerido
+                                deleteCookie('session_token');
+                                showLoginView();
+                                messageDiv.className = 'message error';
+                                messageDiv.textContent = 'Acceso denegado: Se requiere el scope sql:adm';
+                                messageDiv.style.display = 'block';
+                                return;
+                            }
+
+                            // Token válido y tiene el scope, mostrar vista autenticada
                             showAuthenticatedView(token, userData);
                         } else {
                             // Token inválido o expirado, eliminar cookie y mostrar login
@@ -711,7 +792,6 @@ async def start_page():
                 // Actualizar tarjeta de información del usuario
                 if (userData) {
                     document.getElementById('infoUsername').textContent = userData.username || '-';
-                    document.getElementById('infoSessionId').textContent = userData.session_id || '-';
 
                     // Formatear fechas
                     const createdAt = userData.created_at ? new Date(userData.created_at).toLocaleString('es-MX') : '-';
@@ -779,11 +859,35 @@ async def start_page():
                         // Autenticación exitosa
                         const token = data.access_token;
 
-                        // Guardar token en cookie (válida por 1 hora)
-                        setCookie('session_token', token, 1);
+                        // Validar que el usuario tenga el scope sql:adm
+                        const meResponse = await fetch('/me', {
+                            method: 'GET',
+                            headers: {
+                                'Authorization': `Bearer ${token}`
+                            }
+                        });
 
-                        // Mostrar vista autenticada
-                        showAuthenticatedView(token);
+                        if (meResponse.ok) {
+                            const userData = await meResponse.json();
+
+                            // Verificar si tiene el scope sql:adm
+                            if (!userData.scopes || !userData.scopes.includes('sql:adm')) {
+                                messageDiv.className = 'message error';
+                                messageDiv.textContent = 'Acceso denegado: Se requiere el scope sql:adm';
+                                messageDiv.style.display = 'block';
+                                return;
+                            }
+
+                            // Guardar token en cookie (válida por 1 hora)
+                            setCookie('session_token', token, 1);
+
+                            // Mostrar vista autenticada
+                            showAuthenticatedView(token, userData);
+                        } else {
+                            messageDiv.className = 'message error';
+                            messageDiv.textContent = 'Error al validar permisos';
+                            messageDiv.style.display = 'block';
+                        }
                     } else {
                         // Error de autenticación
                         messageDiv.className = 'message error';
@@ -909,16 +1013,21 @@ async def start_page():
             // Variable global para almacenar el interval de polling
             let pollingInterval = null;
 
-            // Función para monitorear el progreso de un job
-            async function monitorearProgreso(jobId) {
-                const token = getCookie('session_token');
-                if (!token) return;
+            // Función para habilitar/deshabilitar todos los botones de ajustes
+            function setButtonsEnabled(enabled) {
+                document.getElementById('btnIniciarBase').disabled = !enabled;
+                document.getElementById('btnCambiarAjustes').disabled = !enabled;
+                document.getElementById('btnActualizarProveedores').disabled = !enabled;
+                document.getElementById('btnRespaldarUsuarios').disabled = !enabled;
+            }
 
-                const statusMessage = document.getElementById('statusMessage');
-                const btnIniciar = document.getElementById('btnIniciarBase');
+            // Función para obtener el historial de jobs
+            async function obtenerHistorialJobs() {
+                const token = getCookie('session_token');
+                if (!token) return null;
 
                 try {
-                    const response = await fetch(`/inicializa_datos/status/${jobId}`, {
+                    const response = await fetch('/inicializa_datos/jobs', {
                         method: 'GET',
                         headers: {
                             'Authorization': `Bearer ${token}`
@@ -926,10 +1035,25 @@ async def start_page():
                     });
 
                     if (response.ok) {
-                        const data = await response.json();
+                        return await response.json();
+                    }
+                } catch (error) {
+                    console.error('Error obteniendo historial de jobs:', error);
+                }
+                return null;
+            }
 
-                        // Actualizar mensaje de estatus
-                        statusMessage.textContent = data.progress || 'Procesando...';
+            // Función para monitorear el progreso de un job
+            async function monitorearProgreso(jobId) {
+                const statusMessage = document.getElementById('statusMessage');
+
+                try {
+                    const response = await fetch(`/inicializa_datos/status/${jobId}`, {
+                        method: 'GET'
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
 
                         // Si el job terminó (completed o failed)
                         if (data.status === 'completed' || data.status === 'failed') {
@@ -941,20 +1065,97 @@ async def start_page():
 
                             // Actualizar clase del mensaje
                             statusMessage.className = 'status-message ' + data.status;
+                            statusMessage.style.display = 'block';
 
-                            // Habilitar botón
-                            btnIniciar.disabled = false;
+                            // Habilitar botones
+                            setButtonsEnabled(true);
 
-                            // Mensaje final
+                            // Mensaje final con historial de jobs
                             if (data.status === 'completed') {
-                                statusMessage.textContent = '✓ Inicialización completada exitosamente';
+                                const historial = await obtenerHistorialJobs();
+                                let mensaje = '✓ Inicialización completada exitosamente';
+
+                                if (historial && historial.total_jobs > 0) {
+                                    mensaje += `\n\nHistorial de inicializaciones: ${historial.total_jobs} total`;
+
+                                    // Mostrar últimos 3 jobs
+                                    const ultimosJobs = historial.jobs.slice(0, 3);
+                                    ultimosJobs.forEach((job, index) => {
+                                        // Validar que created_at exista y sea válido
+                                        if (job.created_at) {
+                                            const fecha = new Date(job.created_at);
+                                            // Validar que la fecha sea válida (después del año 2000)
+                                            if (fecha.getFullYear() > 2000) {
+                                                const fechaFormateada = fecha.toLocaleString('es-MX', {
+                                                    year: 'numeric',
+                                                    month: '2-digit',
+                                                    day: '2-digit',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit',
+                                                    second: '2-digit'
+                                                });
+                                                const estado = job.status === 'completed' ? '✓' : job.status === 'failed' ? '✗' : '⏳';
+                                                mensaje += `\n${estado} ${fechaFormateada} - ${job.status}`;
+                                            }
+                                        }
+                                    });
+                                }
+
+                                statusMessage.innerHTML = mensaje.replace(/\\n/g, '<br>');
                             } else {
                                 statusMessage.textContent = '✗ Error: ' + (data.error || 'Error desconocido');
                             }
                         } else {
-                            // Todavía está corriendo
+                            // Todavía está corriendo - mostrar spinner con mensaje de progreso
                             statusMessage.className = 'status-message running';
+                            statusMessage.style.display = 'block';
+                            statusMessage.innerHTML = '<span>Ejecutando proceso de inicialización<br>' + (data.progress || 'Procesando...') + '   </span><span class="spinner"></span>';
                         }
+                    } else if (response.status === 404) {
+                        // Job no encontrado - el servidor pudo haber reiniciado
+                        // Detener polling
+                        if (pollingInterval) {
+                            clearInterval(pollingInterval);
+                            pollingInterval = null;
+                        }
+
+                        // Re-habilitar botones
+                        setButtonsEnabled(true);
+
+                        // Mostrar mensaje indicando que el tracking se perdió pero la inicialización pudo completarse
+                        statusMessage.className = 'status-message completed';
+                        statusMessage.style.display = 'block';
+
+                        const historial = await obtenerHistorialJobs();
+                        let mensaje = '✓ Proceso de inicialización completado';
+
+                        if (historial && historial.total_jobs > 0) {
+                            mensaje += `\n\nHistorial de inicializaciones: ${historial.total_jobs} total`;
+
+                            // Mostrar últimos 3 jobs
+                            const ultimosJobs = historial.jobs.slice(0, 3);
+                            ultimosJobs.forEach((job, index) => {
+                                // Validar que created_at exista y sea válido
+                                if (job.created_at) {
+                                    const fecha = new Date(job.created_at);
+                                    // Validar que la fecha sea válida (después del año 2000)
+                                    if (fecha.getFullYear() > 2000) {
+                                        const fechaFormateada = fecha.toLocaleString('es-MX', {
+                                            year: 'numeric',
+                                            month: '2-digit',
+                                            day: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            second: '2-digit'
+                                        });
+                                        const estado = job.status === 'completed' ? '✓' : job.status === 'failed' ? '✗' : '⏳';
+                                        mensaje += `\n${estado} ${fechaFormateada} - ${job.status}`;
+                                    }
+                                }
+                            });
+                        }
+
+                        statusMessage.innerHTML = mensaje.replace(/\\n/g, '<br>');
                     }
                 } catch (error) {
                     console.error('Error monitoreando progreso:', error);
@@ -1003,18 +1204,18 @@ async def start_page():
                 const emailSupervisor = document.getElementById('emailSupervisor').value;
 
                 const statusMessage = document.getElementById('statusMessage');
-                const btnIniciar = document.getElementById('btnIniciarBase');
 
                 try {
-                    // Deshabilitar botón
-                    btnIniciar.disabled = true;
+                    // Deshabilitar botones
+                    setButtonsEnabled(false);
 
-                    // Mostrar mensaje inicial
+                    // Mostrar mensaje inicial con spinner
                     statusMessage.className = 'status-message running';
-                    statusMessage.textContent = 'Iniciando proceso...';
+                    statusMessage.style.display = 'block';
+                    statusMessage.innerHTML = '<span>Iniciando proceso...   </span><span class="spinner"></span>';
 
                     // Paso 1: Establecer modo de operación
-                    statusMessage.textContent = 'Estableciendo modo de operación...';
+                    statusMessage.innerHTML = '<span>Estableciendo modo de operación...   </span><span class="spinner"></span>';
                     const modoResponse = await fetch(`/pruebas/${modo}`, {
                         method: 'POST',
                         headers: {
@@ -1024,14 +1225,16 @@ async def start_page():
 
                     if (!modoResponse.ok) {
                         statusMessage.className = 'status-message failed';
+                        statusMessage.style.display = 'block';
                         statusMessage.textContent = '✗ Error al establecer el modo de operación';
-                        btnIniciar.disabled = false;
+                        setButtonsEnabled(true);
                         return;
                     }
 
                     // Paso 2: Ejecutar inicialización con parámetros
-                    statusMessage.textContent = 'Iniciando proceso de inicialización...';
-                    const initResponse = await fetch(`/inicializa_datos?anos=${anos}&email=${encodeURIComponent(emailSupervisor)}`, {
+                    statusMessage.innerHTML = '<span>Ejecutando proceso de inicialización<br>Preparando...   </span><span class="spinner"></span>';
+                    const sessionLimit = document.getElementById('sessionLimitSelect').value;
+                    const initResponse = await fetch(`/inicializa_datos?anos=${anos}&email=${encodeURIComponent(emailSupervisor)}&modo=${modo}&s_activas=${sessionLimit}`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${token}`
@@ -1040,9 +1243,6 @@ async def start_page():
 
                     if (initResponse.ok) {
                         const data = await initResponse.json();
-
-                        // Iniciar monitoreo del progreso
-                        statusMessage.textContent = 'Proceso iniciado. Monitoreando progreso...';
 
                         // Hacer polling cada 2 segundos
                         pollingInterval = setInterval(() => {
@@ -1054,14 +1254,16 @@ async def start_page():
                     } else {
                         const errorData = await initResponse.json();
                         statusMessage.className = 'status-message failed';
+                        statusMessage.style.display = 'block';
                         statusMessage.textContent = '✗ Error: ' + (errorData.detail || 'Error desconocido');
-                        btnIniciar.disabled = false;
+                        setButtonsEnabled(true);
                     }
                 } catch (error) {
                     console.error('Error iniciando base auxiliar:', error);
                     statusMessage.className = 'status-message failed';
+                    statusMessage.style.display = 'block';
                     statusMessage.textContent = '✗ Error de conexión al iniciar la base auxiliar';
-                    btnIniciar.disabled = false;
+                    setButtonsEnabled(true);
                 }
             }
 

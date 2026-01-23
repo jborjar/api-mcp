@@ -11,6 +11,9 @@ services:
       - ./api_mcp/.env
     environment:
       - ACCEPT_EULA=Y
+      - TZ=${TZ:-America/Mexico_City}
+      - LANG=${LANG:-es_MX.UTF-8}
+      - LC_ALL=${LC_ALL:-es_MX.UTF-8}
     volumes:
       - ./db/mssql:/var/opt/mssql
     networks:
@@ -39,6 +42,9 @@ services:
       - POSTFIX_HOSTNAME=${POSTFIX_HOSTNAME:-mail.progex.grupoexpansion.com}
       - POSTFIX_DOMAIN=${POSTFIX_DOMAIN:-progex.grupoexpansion.com}
       - POSTFIX_NETWORKS=${POSTFIX_NETWORKS:-172.16.0.0/12 192.168.0.0/16 10.0.0.0/8}
+      - TZ=${TZ:-America/Mexico_City}
+      - LANG=${LANG:-es_MX.UTF-8}
+      - LC_ALL=${LC_ALL:-es_MX.UTF-8}
       # Relay externo (opcional, descomentar para usar)
       # - POSTFIX_RELAY_HOST=${POSTFIX_RELAY_HOST:-}
       # - POSTFIX_RELAY_PORT=${POSTFIX_RELAY_PORT:-587}
@@ -67,6 +73,10 @@ services:
       - NET_ADMIN # <--- necesario para ip route
     env_file:
       - ./api_mcp/.env
+    environment:
+      - TZ=${TZ:-America/Mexico_City}
+      - LANG=${LANG:-es_MX.UTF-8}
+      - LC_ALL=${LC_ALL:-es_MX.UTF-8}
     volumes:
       - ./app:/app
     working_dir: /app

@@ -9,6 +9,7 @@ from email.utils import make_msgid
 from datetime import datetime
 from hdbcli import dbapi
 from config import get_settings
+from utils import now as tz_now
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from io import BytesIO
@@ -82,6 +83,70 @@ def ensure_database_exists() -> bool:
         if not exists:
             cursor.execute(f"CREATE DATABASE [{settings.MSSQL_DATABASE}]")
 
+        return True
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def ensure_table_settings_exists() -> bool:
+    """
+    Verifica si la tabla SETTINGS existe, si no existe la crea.
+    Retorna True si ya existía o fue creada exitosamente.
+    """
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_NAME = 'SETTINGS'
+        """)
+        exists = cursor.fetchone()[0] > 0
+
+        if not exists:
+            cursor.execute("""
+                CREATE TABLE SETTINGS (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    modo INT NOT NULL,
+                    s_activas INT NOT NULL,
+                    anos_activos INT NOT NULL,
+                    correo NVARCHAR(255) NOT NULL,
+                    fecha DATETIME NOT NULL DEFAULT GETDATE()
+                )
+            """)
+            conn.commit()
+
+        return True
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def insertar_configuracion_settings(modo: int, s_activas: int, anos_activos: int, correo: str) -> bool:
+    """
+    Inserta un registro de configuración en la tabla SETTINGS.
+
+    Args:
+        modo: Modo de operación (0=productivo, 1=pruebas)
+        s_activas: Número de sesiones activas permitidas
+        anos_activos: Años de actividad a analizar
+        correo: Email del supervisor
+
+    Returns:
+        True si se insertó exitosamente
+    """
+    ensure_table_settings_exists()
+
+    conn = get_mssql_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT INTO SETTINGS (modo, s_activas, anos_activos, correo, fecha)
+            VALUES (?, ?, ?, ?, GETDATE())
+        """, (modo, s_activas, anos_activos, correo))
+        conn.commit()
         return True
     finally:
         cursor.close()
@@ -445,7 +510,7 @@ def send_email(to_email: str, subject: str, body: str, attachment: dict | None =
     msg["To"] = to_email
     msg["Subject"] = subject
     msg["Message-ID"] = make_msgid(domain="progex.grupoexpansion")
-    msg["Date"] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0000")
+    msg["Date"] = tz_now().strftime("%a, %d %b %Y %H:%M:%S %z")
     msg["X-Mailer"] = "API-MCP/1.0"
 
     msg.attach(MIMEText(body, "plain"))
@@ -781,7 +846,7 @@ def enviar_correo_inicializacion(
     if not email_destino:
         return {"success": False, "error": "No hay destinatario configurado"}
 
-    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fecha = tz_now().strftime("%Y-%m-%d %H:%M:%S")
     subject = f"Inicializacion de datos - {fecha}"
 
     # Construir cuerpo del mensaje
@@ -856,7 +921,7 @@ def enviar_correo_inicializacion(
         }
 
     attachment = {
-        "filename": f"inicializacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+        "filename": f"inicializacion_{tz_now().strftime('%Y%m%d_%H%M%S')}.json",
         "content": json.dumps(full_result, indent=2, ensure_ascii=False)
     }
 
@@ -1306,7 +1371,7 @@ def analizar_actividad_proveedores(anos: int = 1) -> dict:
         conn_mssql.commit()
 
         resultados = {
-            "fecha_analisis": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "fecha_analisis": tz_now().strftime("%Y-%m-%d %H:%M:%S"),
             "anos_analizados": anos,
             "total_activos": 0,
             "total_inactivos": 0,
@@ -1475,10 +1540,10 @@ def enviar_correo_actividad_proveedores(anos: int) -> dict:
 
         cursor.close()
 
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fecha = tz_now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Calcular período de años involucrados
-        ano_actual = datetime.now().year
+        ano_actual = tz_now().year
         ano_inicio = ano_actual - anos
         if anos == 0:
             periodo = f"{ano_actual}"
@@ -1579,7 +1644,7 @@ def enviar_correo_actividad_proveedores(anos: int) -> dict:
 
         # Adjuntar Excel
         attachment = {
-            "filename": f"Actividad_Proveedores_Periodo_{periodo.replace('-', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            "filename": f"Actividad_Proveedores_Periodo_{periodo.replace('-', '_')}_{tz_now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             "content": excel_buffer.read()
         }
 

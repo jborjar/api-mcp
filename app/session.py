@@ -6,6 +6,7 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from database import get_mssql_connection
+from utils import now as tz_now, get_timezone
 
 
 def ensure_sessions_table_exists() -> None:
@@ -51,7 +52,7 @@ def create_session(username: str, scopes: list[str]) -> str:
     ensure_sessions_table_exists()
 
     session_id = str(uuid.uuid4())
-    now = datetime.now()
+    now = tz_now()
     scopes_str = ",".join(scopes)
 
     # Obtener límite de sesiones activas desde variable de entorno
@@ -125,9 +126,13 @@ def validate_and_renew_session(session_id: str, timeout_minutes: int = 30) -> di
 
         username, scopes_str, last_activity = row
 
+        # Hacer que last_activity sea timezone-aware si no lo es
+        if last_activity.tzinfo is None:
+            last_activity = last_activity.replace(tzinfo=get_timezone())
+
         # Verificar si expiró
         expiration_time = last_activity + timedelta(minutes=timeout_minutes)
-        if datetime.now() > expiration_time:
+        if tz_now() > expiration_time:
             # Sesión expirada, eliminar
             cursor.execute("DELETE FROM USER_SESSIONS WHERE SessionID = ?", (session_id,))
             conn.commit()
@@ -138,7 +143,7 @@ def validate_and_renew_session(session_id: str, timeout_minutes: int = 30) -> di
             UPDATE USER_SESSIONS
             SET LastActivity = ?
             WHERE SessionID = ?
-        """, (datetime.now(), session_id))
+        """, (tz_now(), session_id))
         conn.commit()
 
         scopes = scopes_str.split(",") if scopes_str else []
@@ -201,7 +206,7 @@ def cleanup_expired_sessions(timeout_minutes: int = 30) -> int:
     cursor = conn.cursor()
 
     try:
-        expiration_time = datetime.now() - timedelta(minutes=timeout_minutes)
+        expiration_time = tz_now() - timedelta(minutes=timeout_minutes)
         cursor.execute("""
             DELETE FROM USER_SESSIONS
             WHERE LastActivity < ?

@@ -26,6 +26,7 @@ from database import (
     actualizar_sap_proveedores,
     analizar_actividad_proveedores,
     get_mssql_connection,
+    insertar_configuracion_settings,
 )
 from session import (
     get_active_sessions,
@@ -33,6 +34,7 @@ from session import (
     invalidate_user_sessions,
 )
 from mcp import router as mcp_router
+from utils import now as tz_now
 
 app = FastAPI(
     title="API MCP",
@@ -127,7 +129,7 @@ def cleanup_old_jobs():
     """
     from datetime import timedelta
 
-    now = datetime.now()
+    now = tz_now()
     with jobs_lock:
         jobs_to_remove = []
         for job_id, job_info in initialization_jobs.items():
@@ -155,7 +157,8 @@ async def login(request: LoginRequest) -> TokenResponse:
             "mcp:tools:list",
             "mcp:tools:call",
             "mcp:resources:list",
-            "mcp:resources:read"
+            "mcp:resources:read",
+            "sql:adm"
         ]
         token = create_access_token(subject=request.username, scopes=scopes)
         return TokenResponse(access_token=token)
@@ -349,7 +352,7 @@ async def empresas_registradas(
     }
 
 
-def _run_inicializa_datos_background(job_id: str, session_id: str, username: str, scopes: list[str], anos: int = 0, email: str | None = None):
+def _run_inicializa_datos_background(job_id: str, session_id: str, username: str, scopes: list[str], anos: int = 0, email: str | None = None, modo: int = 0, s_activas: int = 2):
     """Función que se ejecuta en background para inicializar datos."""
     from database import get_mssql_connection
 
@@ -361,8 +364,13 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
 
         # Ejecutar inicialización (esto eliminará y recreará la base de datos)
         with jobs_lock:
-            initialization_jobs[job_id]["progress"] = "Creando tablas SAP_EMPRESAS, SAP_PROVEEDORES y USER_SESSIONS..."
+            initialization_jobs[job_id]["progress"] = "Creando tablas SAP_EMPRESAS, SAP_PROVEEDORES, USER_SESSIONS y SETTINGS..."
         resultado_empresas = inicializa_sap_empresas()
+
+        # Insertar configuración en tabla SETTINGS
+        with jobs_lock:
+            initialization_jobs[job_id]["progress"] = "Guardando configuración en tabla SETTINGS..."
+        insertar_configuracion_settings(modo, s_activas, anos, email or get_settings().EMAIL_SUPERVISOR)
 
         # Prueba Service Layer
         with jobs_lock:
@@ -385,7 +393,7 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
         conn = get_mssql_connection()
         cursor = conn.cursor()
         try:
-            now = datetime.now()
+            now = tz_now()
             scopes_str = ",".join(scopes)
             cursor.execute("""
                 INSERT INTO USER_SESSIONS (SessionID, Username, CreatedAt, LastActivity, Scopes)
@@ -427,14 +435,14 @@ def _run_inicializa_datos_background(job_id: str, session_id: str, username: str
                 "email_enviado": email_result,
                 "session_restored": True
             }
-            initialization_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            initialization_jobs[job_id]["finished_at"] = tz_now().isoformat()
 
     except Exception as e:
         # Marcar como fallido
         with jobs_lock:
             initialization_jobs[job_id]["status"] = "failed"
             initialization_jobs[job_id]["error"] = str(e)
-            initialization_jobs[job_id]["finished_at"] = datetime.now().isoformat()
+            initialization_jobs[job_id]["finished_at"] = tz_now().isoformat()
 
 
 @app.post("/inicializa_datos", tags=["MSSQL"])
@@ -442,7 +450,9 @@ async def inicializa_datos(
     background_tasks: BackgroundTasks,
     current_user: Annotated[TokenData, Depends(get_current_user)],
     anos: int = 0,
-    email: str | None = None
+    email: str | None = None,
+    modo: int = 0,
+    s_activas: int = 2
 ) -> dict:
     """
     Inicializa la base de datos completa de forma asíncrona.
@@ -450,16 +460,23 @@ async def inicializa_datos(
     Este endpoint retorna inmediatamente un job_id que puede usarse para consultar
     el progreso de la inicialización mediante GET /inicializa_datos/status/{job_id}
 
+    Parámetros:
+    - anos: Años de actividad a analizar (0=solo año actual, 1=actual+1 anterior, etc.)
+    - email: Email del supervisor para notificaciones
+    - modo: Modo de operación (0=productivo, 1=pruebas)
+    - s_activas: Número de sesiones activas permitidas por usuario (1, 2, 5)
+
     Operaciones realizadas en background:
     1. Elimina y recrea la base de datos desde cero
-    2. Crea las tablas SAP_EMPRESAS, SAP_PROVEEDORES y USER_SESSIONS
-    3. Carga SAP_EMPRESAS desde HANA
-    4. Restaura la sesión del usuario actual
-    5. Verifica si existen versiones _PRUEBAS de cada instancia
-    6. Obtiene datos de OADM (PrintHeadr, CompnyAddr, TaxIdNum)
-    7. Prueba login/logout en Service Layer para cada instancia
-    8. Actualiza los campos SL y SLP en SAP_EMPRESAS (1=éxito, 0=fallo)
-    9. Puebla SAP_PROVEEDORES con datos del Service Layer
+    2. Crea las tablas SAP_EMPRESAS, SAP_PROVEEDORES, USER_SESSIONS y SETTINGS
+    3. Guarda la configuración en la tabla SETTINGS
+    4. Carga SAP_EMPRESAS desde HANA
+    5. Restaura la sesión del usuario actual
+    6. Verifica si existen versiones _PRUEBAS de cada instancia
+    7. Obtiene datos de OADM (PrintHeadr, CompnyAddr, TaxIdNum)
+    8. Prueba login/logout en Service Layer para cada instancia
+    9. Actualiza los campos SL y SLP en SAP_EMPRESAS (1=éxito, 0=fallo)
+    10. Puebla SAP_PROVEEDORES con datos del Service Layer
 
     NOTA: Este endpoint recrea la base de datos completa, por lo que la sesión
     del usuario se elimina y se vuelve a crear automáticamente.
@@ -479,7 +496,7 @@ async def inicializa_datos(
             "progress": "Trabajo en cola...",
             "result": None,
             "error": None,
-            "started_at": datetime.now().isoformat(),
+            "started_at": tz_now().isoformat(),
             "finished_at": None
         }
 
@@ -491,7 +508,9 @@ async def inicializa_datos(
         username,
         scopes,
         anos,
-        email
+        email,
+        modo,
+        s_activas
     )
 
     return {
@@ -504,11 +523,13 @@ async def inicializa_datos(
 
 @app.get("/inicializa_datos/status/{job_id}", tags=["MSSQL"])
 async def get_inicializa_datos_status(
-    job_id: str,
-    current_user: Annotated[TokenData, Depends(get_current_user)]
+    job_id: str
 ) -> dict:
     """
     Consulta el estado de un trabajo de inicialización.
+
+    NOTA: Este endpoint no requiere autenticación para permitir el monitoreo
+    durante el proceso de inicialización (cuando la sesión puede estar siendo recreada).
 
     Estados posibles:
     - pending: El trabajo está en cola
